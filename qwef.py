@@ -435,18 +435,21 @@ class ContextManager():
         self.print_seg_regs()
         self.print_eflags()
     
-    def conti(self) -> None:
-        pykd.dbgCommand("g")
+    def conti(self, cnt: int = 1) -> None:
+        for _ in range(cnt):
+            pykd.dbgCommand("g")
         self.print_context()
         pykd.dbgCommand("c")
     
-    def ni(self) -> None:
-        pykd.dbgCommand("p")
+    def ni(self, cnt: int = 1) -> None:
+        for _ in range(cnt):
+            pykd.dbgCommand("p")
         self.print_context()
         pykd.dbgCommand("ni")
     
-    def si(self) -> None:
-        pykd.dbgCommand("t")
+    def si(self, cnt: int = 1) -> None:
+        for _ in range(cnt):
+            pykd.dbgCommand("t")
         self.print_context()
         pykd.dbgCommand("si")
         
@@ -900,11 +903,29 @@ if __name__ == "__main__":
         if command == 'vmmap':
             vmmap.print_vmmap()
         elif command == 'c':
-            context.conti()
+            if len(sys.argv) == 2:
+                context.conti()
+            elif len(sys.argv) == 3:
+                if sys.argv[2].startswith("0x"):
+                    context.conti(int(sys.argv[2], 16))
+                else:
+                    context.conti(int(sys.argv[2]))
         elif command == 'ni':
-            context.ni()
+            if len(sys.argv) == 2:
+                context.ni()
+            elif len(sys.argv) == 3:
+                if sys.argv[2].startswith("0x"):
+                    context.ni(int(sys.argv[2], 16))
+                else:
+                    context.ni(int(sys.argv[2]))
         elif command == 'si':
-            context.si()
+            if len(sys.argv) == 2:
+                context.si()
+            elif len(sys.argv) == 3:
+                if sys.argv[2].startswith("0x"):
+                    context.si(int(sys.argv[2], 16))
+                else:
+                    context.si(int(sys.argv[2]))
         elif command == 'view':
             context.print_context()
         elif command == "find":
