@@ -747,7 +747,7 @@ class SearchPattern():
         dumped_pattern: str = ""
         retlist: typing.List[int] = []
         
-        dumped_pattern = pykd.dbgCommand(f"s -a {hex(start)} {hex(end)} {search_value}")
+        dumped_pattern = pykd.dbgCommand(f"s -a {hex(start)} {hex(end)} \"{search_value}\"")
         
         if dumped_pattern == None:
             return []
@@ -757,7 +757,7 @@ class SearchPattern():
                 continue
             line = line.replace('`', '').split("  ")[0]
             retlist.append(int(f"0x{line.strip().split(' ')[0]}", 16))
-    
+
         return retlist
     
     def find(self, pattern: str, start: int = 0x0, end: int = 0xffffffffffffffff, level: int = 0) -> None:
@@ -852,7 +852,6 @@ class SearchPattern():
             
             for section in self.vmmap.dump_section():
                 once: bool = True
-                offset: int = 0
                 
                 if section.base_address < start:
                     continue
@@ -872,10 +871,23 @@ class SearchPattern():
                         else:
                             info = section.usage
                         pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
-                    pykd.dprint(self.color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
+                    pykd.dprint(self.color.white(f"0x{(addr):016x}"), dml=True)
                     pykd.dprint(f":\t")
-                    pykd.dprint(self.memoryaccess.get_string(addr)) 
-                    pykd.dprintln("")
+                    
+                    memval: bytes = self.memoryaccess.get_bytes(addr, 0x10)
+                    
+                    for ch in memval:
+                        pykd.dprint(f"{ch:02x} ")
+                    pykd.dprint("| ")
+                    for ch in memval:
+                        ch = chr(ch)
+                        if ch in string.whitespace:
+                            pykd.dprint(".")
+                        elif ch in string.printable:
+                            pykd.dprint(ch)
+                        else:
+                            pykd.dprint(".")
+                    pykd.dprintln(" |")
                     
             pykd.dprintln(self.color.white(f"[+] Searching pattern finished"), dml=True)
                     
