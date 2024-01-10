@@ -1,8 +1,10 @@
+import re
 import os
 import sys
 import pykd
 import enum
 import typing
+import string
 
 from dataclasses import dataclass, fields, asdict
 
@@ -192,6 +194,54 @@ class EflagsRegister():
     def assign(self, name, value):
         setattr(self, name, value)
     
+class MemoryAccess():
+    def __init__(self):
+        self.addr_symbol: typing.Dict[int, str] = {}
+    
+    def deref_ptr(self, ptr, mask) -> typing.Union[int, None]:
+        try:
+            return pykd.loadPtrs(ptr, 1)[0] & mask
+        except pykd.MemoryException:
+            return None
+        
+    def get_string(self, ptr) -> typing.Union[str, None]:
+        try:
+            return pykd.loadCStr(ptr)
+        except pykd.MemoryException:
+            return None
+        except UnicodeDecodeError:
+            return None
+    
+    def get_bytes(self, ptr, size) -> typing.Union[bytes, None]:
+        try:
+            return pykd.loadBytes(ptr, size)
+        except pykd.MemoryException:
+            return None
+        except UnicodeDecodeError:
+            return None
+        
+    def get_symbol(self, ptr) -> typing.Union[str, None]:
+        if ptr in self.addr_symbol:
+            return self.addr_symbol[ptr]
+        try:
+            val = pykd.findSymbol(ptr)
+            if val == hex(ptr)[2:]:
+                self.addr_symbol[ptr] = None
+                return None
+            else:
+                self.addr_symbol[ptr] = val
+                return val
+        except pykd.MemoryException:
+            return None
+    
+    def get_qword_str_data_by_ptr(self, ptr: int, size: int = 0x10) -> typing.List[int]:
+        retlist: typing.List[int] = []
+        for val in pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}").replace("`", "").split("  ")[1].strip().split(" "):
+            try:
+                retlist.append(int(val, 16))
+            except:
+                raise Exception("Invalid data, please check valid ptr first")
+        return retlist
     
 class ContextManager():
     
@@ -204,6 +254,7 @@ class ContextManager():
         
         self.color = ColourManager()
         self.vmmap = Vmmap()
+        self.memoryaccess = MemoryAccess()
         
         self.segments_info: typing.List[SectionInfo] = self.vmmap.dump_section()
         
@@ -239,30 +290,6 @@ class ContextManager():
         self.print_code()
         pykd.dprintln(self.color.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
         self.print_stack()
-        
-    def deref_ptr(self, ptr) -> typing.Union[int, None]:
-        try:
-            return pykd.loadPtrs(ptr, 1)[0] & self.ptrmask
-        except pykd.MemoryException:
-            return None
-        
-    def get_string(self, ptr) -> typing.Union[str, None]:
-        try:
-            return pykd.loadCStr(ptr)
-        except pykd.MemoryException:
-            return None
-        except UnicodeDecodeError:
-            return None
-        
-    def get_symbol(self, ptr) -> typing.Union[str, None]:
-        try:
-            val = pykd.findSymbol(ptr)
-            if val == hex(ptr)[2:]:
-                return None
-            else:
-                return val
-        except pykd.MemoryException:
-            return None
     
     def colorize_print_by_priv(self, value) -> None:
         for section in self.segments_info:
@@ -298,10 +325,10 @@ class ContextManager():
                 return
             else:
                 pykd.dprint(" ->", dml=True)
-                self.deep_print(self.deref_ptr(value), remain - 1, value)
+                self.deep_print(self.memoryaccess.deref_ptr(value, self.ptrmask), remain - 1, value)
                 return
         elif pykd.isValid(xref):
-            value: typing.Union[str, None] = self.get_string(xref)
+            value: typing.Union[str, None] = self.memoryaccess.get_string(xref)
             if value is None:
                 pykd.dprintln("")
                 return
@@ -347,7 +374,7 @@ class ContextManager():
 
         for _ in range(print_range):
             op_str, asm_str = self.disasm(pc)
-            sym: str = self.get_symbol(pc)
+            sym: str = self.memoryaccess.get_symbol(pc)
             debug_info: str = ""
             if sym is not None:
                 debug_info: str = f" <{sym}> "
@@ -364,7 +391,7 @@ class ContextManager():
         for offset in range(-3, 6):
             addr = pykd.disasm().findOffset(offset)
             op_str, asm_str = self.disasm(addr)
-            sym: str = self.get_symbol(addr)
+            sym: str = self.memoryaccess.get_symbol(addr)
             debug_info: str = ""
             if sym is not None:
                 debug_info: str = f" <{sym}> "
@@ -381,7 +408,7 @@ class ContextManager():
                             num = int(asm_str.split(" ")[1])
                     except:
                         num = 0
-                    goto: int = self.deref_ptr(self.regs.rsp + num * (8 if self.arch == pykd.CPUType.AMD64 else 4))
+                    goto: int = self.memoryaccess.deref_ptr(self.regs.rsp + num * (8 if self.arch == pykd.CPUType.AMD64 else 4), self.ptrmask)
                     
                     if goto is not None:
                         self.print_code_by_address(goto, " "*8, 4)
@@ -411,6 +438,7 @@ class ContextManager():
     def conti(self) -> None:
         pykd.dbgCommand("g")
         self.print_context()
+        pykd.dbgCommand("c")
     
     def ni(self) -> None:
         pykd.dbgCommand("p")
@@ -420,6 +448,7 @@ class ContextManager():
     def si(self) -> None:
         pykd.dbgCommand("t")
         self.print_context()
+        pykd.dbgCommand("si")
         
 class PageState(enum.IntEnum):
     MEM_COMMIT = 0x1000
@@ -650,13 +679,181 @@ class Vmmap():
                 pykd.dprint(color(printst), dml=True)
                 pykd.dprintln(f" {path_info}")
 
+class SearchPattern():
+    def __init__(self):
+        self.vmmap = Vmmap()
+        self.color = ColourManager()
+        self.memoryaccess = MemoryAccess()
+        
+        self.ptrmask: int = 0xffffffffffffffff if pykd.getCPUMode() == pykd.CPUType.AMD64 else 0xffffffff
+    
+    def help(self):
+        pykd.dprintln(self.color.white("[-] Usage: find [pattern](int, 0x, 0o, 0b, dec, str)"), dml=True)
+        
+    def find_int(self, start, end, search_value, inputsize) -> typing.List[int]:
+        dumped_pattern: str = ""
+        retlist: typing.List[int] = []
+        search_bytes: str = ""
+        for ch in search_value.to_bytes(inputsize, byteorder="little"):
+            search_bytes += f" {ch:02x}"
+        
+        dumped_pattern = pykd.dbgCommand(f"s {hex(start)} {hex(end)}{search_bytes}")
+        
+        if dumped_pattern == None:
+            return []
+        
+        for line in dumped_pattern.split("\n"):
+            if line.strip() == "":
+                continue
+            line = line.replace('`', '').split("  ")[0]
+            retlist.append(int(f"0x{line.strip().split(' ')[0]}", 16))
+    
+        return retlist
+
+    def find_str(self, start, end, search_value) -> typing.List[int]:
+        dumped_pattern: str = ""
+        retlist: typing.List[int] = []
+        
+        dumped_pattern = pykd.dbgCommand(f"s -a {hex(start)} {hex(end)} {search_value}")
+        
+        if dumped_pattern == None:
+            return []
+        
+        for line in dumped_pattern.split("\n"):
+            if line.strip() == "":
+                continue
+            line = line.replace('`', '').split("  ")[0]
+            retlist.append(int(f"0x{line.strip().split(' ')[0]}", 16))
+    
+        return retlist
+    
+    def find(self, pattern: str, start: int = 0x0, end: int = 0xffffffffffffffff, level: int = 0) -> None:
+        
+        find_int_mode: bool = False
+        search_value: typing.Union[int, str]
+        
+        if pattern.startswith("0x"):
+            find_int_mode = True
+            search_value = int(pattern, 16)
+        elif pattern.startswith("0b"):
+            find_int_mode = True
+            search_value = int(pattern, 2)
+        elif pattern.startswith("0o"):
+            find_int_mode = True
+            search_value = int(pattern, 8)
+        elif (pattern.startswith("'") and pattern.endswith("'")) \
+            or (pattern.startswith("\"") and pattern.endswith("\"")):
+            find_int_mode = False
+            search_value = pattern[1:-1]
+        else:
+            try:
+                find_int_mode = True
+                search_value = int(pattern)
+            except:
+                find_int_mode = False
+                search_value = pattern
+
+        if find_int_mode:
+            inputsize: int = 0
+            tmp: int = search_value
+            
+            while tmp != 0:
+                tmp = tmp >> 8
+                inputsize += 1
+            if inputsize > 8:
+                pykd.dprintln(self.color.white("[-] Invalid pattern (too long)"), dml=True)
+                self.help()
+                return
+
+            pykd.dprintln(self.color.white(f"[+] Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            
+            for section in self.vmmap.dump_section():
+                once: bool = True
+                offset: int = 0
+                
+                if section.base_address < start:
+                    continue
+                if section.base_address > end:
+                    break
+                if section.state & PageState.MEM_FREE or section.state & PageState.MEM_RESERVE:
+                    continue
+                
+                dump_result: typing.List[int] = self.find_int(section.base_address, section.end_address, search_value, inputsize)
+                
+                if dump_result == []:
+                    continue
+                
+                for addr in dump_result:
+                    hex_datas: typing.List[int] = self.memoryaccess.get_qword_str_data_by_ptr(addr)
+                    if once:
+                        once = False
+                        info: str = ""
+                        if section.image_path != "":
+                            info = section.image_path
+                        elif section.mapped_file_name != "":
+                            info = section.mapped_file_name
+                        else:
+                            info = section.usage
+                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{str(section.protect)}])", dml=True)
+                    pykd.dprint(self.color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
+                    pykd.dprint(f":\t")
+                
+                    for data in hex_datas:
+                        pykd.dprint(f"0x{data:016x} ")
+                    pykd.dprint("| ")
+                    for data in hex_datas:
+                        for ch in p64(data):
+                            if chr(ch) in string.whitespace:
+                                pykd.dprint(".")
+                            elif chr(ch) in string.printable:
+                                pykd.dprint(chr(ch))
+                            else:
+                                pykd.dprint(".")
+                    pykd.dprintln(" |")
+                            
+            pykd.dprintln(self.color.white(f"[+] Searching pattern finished"), dml=True)
+        
+        else:
+            pykd.dprintln(self.color.white(f"[+] Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            
+            for section in self.vmmap.dump_section():
+                once: bool = True
+                offset: int = 0
+                
+                if section.base_address < start:
+                    continue
+                if section.base_address > end:
+                    break
+                if section.state & PageState.MEM_FREE or section.state & PageState.MEM_RESERVE:
+                    continue
+                
+                for addr in self.find_str(section.base_address, section.end_address, search_value):
+                    if once:
+                        once = False
+                        info: str = ""
+                        if section.image_path != "":
+                            info = section.image_path
+                        elif section.mapped_file_name != "":
+                            info = section.mapped_file_name
+                        else:
+                            info = section.usage
+                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{str(section.protect)}])", dml=True)
+                    pykd.dprint(self.color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
+                    pykd.dprint(f":\t")
+                    pykd.dprint(self.memoryaccess.get_string(addr))
+                    pykd.dprintln("")
+                    
+            pykd.dprintln(self.color.white(f"[+] Searching pattern finished"), dml=True)
+                    
+    
+    
 ## register commands
-# cmd.register("vmmap", "vmmap.print_vmmap")  
 if __name__ == "__main__":
     
     cmd = CmdManager()
-    context = ContextManager()       
-    vmmap = Vmmap() 
+    context = ContextManager()    
+    vmmap = Vmmap()
+    search = SearchPattern()
     
     ## register commands
     cmd.alias("vmmap", "vmmap")
@@ -664,8 +861,10 @@ if __name__ == "__main__":
     cmd.alias("c", "c")
     cmd.alias("ni", "ni")
     cmd.alias("si", "si")
+    cmd.alias("find", "find")
+    cmd.alias("view", "view")
     
-    if len(sys.argv) == 2:
+    if len(sys.argv) > 1:
         command=sys.argv[1]
         if command == 'vmmap':
             vmmap.print_vmmap()
@@ -675,4 +874,12 @@ if __name__ == "__main__":
             context.ni()
         elif command == 'si':
             context.si()
-            
+        elif command == 'view':
+            context.print_context()
+        elif command == "find":
+            if len(sys.argv) == 3:
+                search.find(sys.argv[2])
+            elif len(sys.argv) == 5:
+                search.find(sys.argv[2], int(sys.argv[3], 16), int(sys.argv[4], 16))
+            else:
+                search.help()
