@@ -476,6 +476,36 @@ class PageProtect(enum.IntEnum):
 
     def __str__(self) -> str:
         return self.name
+    
+    def to_str(enum_value) -> str:
+        retstr: str = ""
+        if enum_value & PageProtect.PAGE_NOACCESS:
+            retstr += "noaccess"
+        elif enum_value & PageProtect.PAGE_READONLY:
+            retstr += "readonly"
+        elif enum_value & PageProtect.PAGE_READWRITE:
+            retstr += "readwrite"
+        elif enum_value & PageProtect.PAGE_WRITECOPY:
+            retstr += "writecopy"
+        elif enum_value & PageProtect.PAGE_EXECUTE:
+            retstr += "execute"
+        elif enum_value & PageProtect.PAGE_EXECUTE_READ:
+            retstr += "execute_read"
+        elif enum_value & PageProtect.PAGE_EXECUTE_READWRITE:
+            retstr += "execute_readwrite"
+        elif enum_value & PageProtect.PAGE_EXECUTE_WRITECOPY:
+            retstr += "execute_writecopy"
+        
+        if enum_value & PageProtect.PAGE_GUARD:
+            retstr += " + guard"
+        if enum_value & PageProtect.PAGE_NOCACHE:
+            retstr += " + nocache"
+        if enum_value & PageProtect.PAGE_WRITECOMBINE:
+            retstr += " + writecombine"
+        if enum_value & PageProtect.PAGE_TARGETS_INVALID:
+            retstr += " + targets_invalid"
+        
+        return retstr
 
 class PageType(enum.IntEnum):
     MEM_IMAGE = 0x1000000
@@ -794,7 +824,8 @@ class SearchPattern():
                             info = section.mapped_file_name
                         else:
                             info = section.usage
-                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{str(section.protect)}])", dml=True)
+                        print(type(section.protect))
+                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
                     pykd.dprint(self.color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
                     pykd.dprint(f":\t")
                 
@@ -837,10 +868,10 @@ class SearchPattern():
                             info = section.mapped_file_name
                         else:
                             info = section.usage
-                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{str(section.protect)}])", dml=True)
+                        pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
                     pykd.dprint(self.color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
                     pykd.dprint(f":\t")
-                    pykd.dprint(self.memoryaccess.get_string(addr))
+                    pykd.dprint(self.memoryaccess.get_string(addr)) 
                     pykd.dprintln("")
                     
             pykd.dprintln(self.color.white(f"[+] Searching pattern finished"), dml=True)
