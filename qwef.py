@@ -145,6 +145,9 @@ class I386Register():
         self.eax: int = -1; self.ebx: int = -1; self.ecx: int = -1; self.edx: int = -1
         self.edi: int = -1; self.esi: int = -1; self.ebp: int = -1; self.esp: int = -1
         self.eip: int = -1
+    
+    def assign(self, name, value):
+        setattr(self, name, value)
 
 @dataclass
 class Amd64Register():
@@ -408,7 +411,7 @@ class ContextManager():
                             num = int(asm_str.split(" ")[1])
                     except:
                         num = 0
-                    goto: int = self.memoryaccess.deref_ptr(self.regs.rsp + num * (8 if self.arch == pykd.CPUType.AMD64 else 4), self.ptrmask)
+                    goto: int = self.memoryaccess.deref_ptr(self.regs.rsp + num * 8 if self.arch == pykd.CPUType.AMD64 else self.regs.esp + num * 4, self.ptrmask)
                     
                     if goto is not None:
                         self.print_code_by_address(goto, " "*8, 4)
@@ -419,7 +422,7 @@ class ContextManager():
         sp = self.regs.rsp if self.arch == pykd.CPUType.AMD64 else self.regs.esp
         
         if self.arch == pykd.CPUType.I386:
-            for offset in range(4):
+            for offset in range(8):
                 pykd.dprint(f"[sp + {offset*4:02x}] ")
                 addr = sp + offset * 4
                 self.deep_print(addr, 2)
