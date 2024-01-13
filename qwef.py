@@ -233,7 +233,7 @@ class MemoryAccess():
             return None
     
     def get_bytes(self, ptr: int, size: int) -> typing.Union[bytes, None]:
-        """load bytes given siez
+        """load bytes given size
 
         Args:
             ptr (int): pointer address
