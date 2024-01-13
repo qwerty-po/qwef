@@ -253,7 +253,6 @@ class PageState(enum.IntEnum):
     
     def __str__(self) -> str:
         return self.name
-    
 class PageProtect(enum.IntEnum):
     PAGE_NOACCESS = 0x01
     PAGE_READONLY = 0x02
@@ -272,6 +271,69 @@ class PageProtect(enum.IntEnum):
 
     def __str__(self) -> str:
         return self.name
+
+    def is_executable(enum_val) -> bool:
+        if enum_val & (
+                PageProtect.PAGE_EXECUTE \
+                | PageProtect.PAGE_EXECUTE_READ \
+                | PageProtect.PAGE_EXECUTE_READWRITE \
+                | PageProtect.PAGE_EXECUTE_WRITECOPY
+            ):
+            return True
+        else:
+            return False
+    
+    def is_writable(enum_val) -> bool:
+        if enum_val & (
+                PageProtect.PAGE_READWRITE \
+                | PageProtect.PAGE_WRITECOPY
+            ):
+            return True
+        else:
+            return False
+    
+    def is_readable(enum_val) -> bool:
+        if enum_val & (
+                PageProtect.PAGE_READONLY \
+                | PageProtect.PAGE_READWRITE \
+                | PageProtect.PAGE_WRITECOPY
+            ):
+            return True
+        else:
+            return False
+    
+    def is_copy_on_write(enum_val) -> bool:
+        if enum_val & (
+                PageProtect.PAGE_WRITECOPY \
+                | PageProtect.PAGE_EXECUTE_WRITECOPY
+            ):
+            return True
+        else:
+            return False
+    
+    def is_guard(enum_val) -> bool:
+        if enum_val & PageProtect.PAGE_GUARD:
+            return True
+        else:
+            return False
+    
+    def is_nocache(enum_val) -> bool:
+        if enum_val & PageProtect.PAGE_NOCACHE:
+            return True
+        else:
+            return False
+    
+    def is_writecombine(enum_val) -> bool:
+        if enum_val & PageProtect.PAGE_WRITECOMBINE:
+            return True
+        else:
+            return False
+    
+    def is_targets_invalid(enum_val) -> bool:
+        if enum_val & PageProtect.PAGE_TARGETS_INVALID:
+            return True
+        else:
+            return False
     
     def to_str(enum_value) -> str:
         retstr: str = ""
@@ -311,6 +373,17 @@ class PageType(enum.IntEnum):
     def __str__(self) -> str:
         return self.name
     
+    def to_str(self, enum_value) -> str:
+        retstr: str = ""
+        if enum_value & PageType.MEM_IMAGE:
+            retstr += "image"
+        elif enum_value & PageType.MEM_MAPPED:
+            retstr += "mapped"
+        elif enum_value & PageType.MEM_PRIVATE:
+            retstr += "private"
+        
+        return retstr
+    
 @dataclass
 class SectionInfo:
     usage: str
@@ -333,33 +406,11 @@ class SectionInfo:
         self.state: PageState = PageState.MEM_FREE
         self.protect: PageProtect = PageProtect.PAGE_NOACCESS
         self.type: PageType = PageType.MEM_PRIVATE
-
 class Vmmap():
     
     def __init__(self):
         self.color = ColourManager()
-    
-    def vmmap(self):
-        section_info: list = []
-        for section in pykd.dbgCommand("!vadump").split("\n\n"):
-            base_address: int = -1
-            end_address: int = -1
-            for line_info in section.split("\n"):
-                if line_info.startswith("BaseAddress"):
-                    base_address = int(f"0x{line_info.split(':')[1].strip()}", 16)
-                elif line_info.startswith("RegionSize"):
-                    end_address = base_address + int(f"0x{line_info.split(':')[1].strip()}", 16)
-            if base_address == -1 or end_address == -1:
-                continue
-            else:
-                section_info.append({
-                    "base_address": base_address,
-                    "end_address": end_address,
-                    "size": end_address - base_address,
-                })
 
-        return section_info
-    
     def section_info(self, address: int) -> SectionInfo:
         section_info: SectionInfo = SectionInfo()
         
@@ -434,52 +485,35 @@ class Vmmap():
                 state_info += 'reserve'
             elif section_info.state & PageState.MEM_COMMIT:
                 state_info += 'commit'
-                if section_info.protect & (
-                        PageProtect.PAGE_EXECUTE \
-                        | PageProtect.PAGE_EXECUTE_READ \
-                        | PageProtect.PAGE_EXECUTE_READWRITE \
-                        | PageProtect.PAGE_EXECUTE_WRITECOPY
-                    ):
-                    color = self.color.red
-                    
-                    if section_info.protect & PageProtect.PAGE_EXECUTE_READWRITE:
-                        priv_info = 'rwx'
-                    
-                    elif section_info.protect & PageProtect.PAGE_EXECUTE_WRITECOPY:
-                        priv_info = 'cwx'
-                        
-                    elif section_info.protect & PageProtect.PAGE_EXECUTE_READ:
-                        priv_info = 'r-x'
-                    
-                    elif section_info.protect & PageProtect.PAGE_EXECUTE:
-                        priv_info = 'r--'
-                    
-                elif section_info.protect & (
-                        PageProtect.PAGE_READWRITE \
-                        | PageProtect.PAGE_WRITECOPY
-                    ):
-                    color = self.color.green
-                    
-                    if section_info.protect & PageProtect.PAGE_READWRITE:
-                        priv_info = 'rw-'
-                    
-                    elif section_info.protect & PageProtect.PAGE_WRITECOPY:
-                        priv_info = 'cw-'
-                    
-                elif section_info.protect & PageProtect.PAGE_READONLY:
-                    color = self.color.white
-                    
-                    priv_info = 'r--'
-                    
-                else:
-                    color = self.color.gray
-                    
-                    priv_info = '---'
-            
-                if section_info.protect & PageProtect.PAGE_GUARD:
+                if PageProtect.is_guard(section_info.protect):
                     color = self.color.gray
                     guard_info += '(g)'
-            
+                elif PageProtect.is_executable(section_info.protect):
+                    color = self.color.red
+                elif PageProtect.is_writable(section_info.protect):
+                    color = self.color.green
+                elif section_info.protect & PageProtect.PAGE_READONLY:
+                    color = self.color.white
+                else:
+                    color = self.color.gray
+                
+                if PageProtect.is_copy_on_write(section_info.protect):
+                    priv_info += 'c'
+                elif PageProtect.is_readable(section_info.protect):
+                    priv_info += 'r'
+                else:
+                    priv_info += '-'
+                    
+                if PageProtect.is_writable(section_info.protect):
+                    priv_info += 'w'
+                else:
+                    priv_info += '-'
+                
+                if PageProtect.is_executable(section_info.protect):
+                    priv_info += 'x'
+                else:
+                    priv_info += '-'
+
             if section_info.type & PageType.MEM_MAPPED:
                 type_info += 's'
             elif section_info.type & PageType.MEM_PRIVATE:
