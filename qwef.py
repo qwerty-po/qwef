@@ -1042,7 +1042,7 @@ class SEH(TEB):
         if tebaddress is None:
             return self.sehchain
         
-        currseh_ptr: int = pykd.ptrPtr(tebaddress)
+        currseh_ptr: int = memoryaccess.deref_ptr(tebaddress, context.ptrmask)
         if currseh_ptr == 0:
             return self.sehchain
         else:
@@ -1068,16 +1068,16 @@ class SEH(TEB):
             if sehinfo.Next is None:
                 pykd.dprintln(f"0x{sehinfo.Curr:08x}: (chain is broken)")
                 return
-            elif sehinfo.Next is not context.ptrmask:
+            else:
                 if memoryaccess.get_symbol(sehinfo.Handler) is not None:
                     pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <{memoryaccess.get_symbol(sehinfo.Handler)}>")
                 elif not pykd.isValid(sehinfo.Handler):
                     pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <invalid address>")
                 else:
                     pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x}")
-            else:
-                pykd.dprintln(f"(end of chain)")
-                return
+                if sehinfo.Next == context.ptrmask:
+                    pykd.dprintln(f"     ↓\n(end of chain)")
+            
 
                 
 
