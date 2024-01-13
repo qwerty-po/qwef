@@ -737,7 +737,6 @@ class ContextManager():
         self.print_eflags()
     
     def conti(self, cnt: int = 1) -> None:
-        pykd.dbgCommand(".cls")
         for _ in range(cnt):
             pykd.dbgCommand("g")
         self.print_context()
