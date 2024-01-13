@@ -245,217 +245,7 @@ class MemoryAccess():
             except:
                 raise Exception("Invalid data, please check valid ptr first")
         return retlist
-    
-class ContextManager():
-    
-    def __init__(self):
-        self.arch = pykd.getCPUMode()
-        self.regs : typing.Union[Amd64Register, I386Register]
-        self.segregs : SegmentRegister = SegmentRegister()
-        self.eflags : EflagsRegister = EflagsRegister()
-        self.ptrmask: int = 0xffffffffffffffff if self.arch == pykd.CPUType.AMD64 else 0xffffffff
-        
-        self.color = ColourManager()
-        self.vmmap = Vmmap()
-        self.memoryaccess = MemoryAccess()
-        
-        self.segments_info: typing.List[SectionInfo] = self.vmmap.dump_section()
-        
-        if self.arch == pykd.CPUType.AMD64:
-            self.regs = Amd64Register()
-        elif self.arch == pykd.CPUType.I386:
-            self.regs = I386Register()
-        else:
-            raise Exception("Unsupported CPU mode")
-        
-    def update_regs(self):
-        for reg, _ in asdict(self.regs).items():
-            self.regs.assign(reg, pykd.reg(reg))
-        for reg, _ in asdict(self.segregs).items():
-            self.segregs.assign(reg, pykd.reg(reg))
-            
-    def update_eflags(self):
-        eflags = pykd.reg("efl")
-        for i, flaginfo in enumerate(asdict(self.eflags).items()):
-            self.eflags.assign(flaginfo[0], (((eflags >> EflagsEnum[flaginfo[0]]) & 1) == 1))
-            
-    def update_vmmap(self):
-        self.segments_info = self.vmmap.dump_section()
-        
-    def print_context(self):
-        self.update_regs()
-        self.update_eflags()
-        self.update_vmmap()
-        
-        pykd.dprintln(self.color.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
-        self.print_regs()
-        pykd.dprintln(self.color.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
-        self.print_code()
-        pykd.dprintln(self.color.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
-        self.print_stack()
-    
-    def colorize_print_by_priv(self, value) -> None:
-        for section in self.segments_info:
-            if section.base_address <= value <= section.end_address:
-                if section.usage == "Stack":
-                    pykd.dprint(self.color.purple(f" 0x{value:016x}"), dml=True)
-                elif section.protect & (
-                        PageProtect.PAGE_EXECUTE \
-                        | PageProtect.PAGE_EXECUTE_READ \
-                        | PageProtect.PAGE_EXECUTE_READWRITE \
-                        | PageProtect.PAGE_EXECUTE_WRITECOPY
-                    ):
-                    pykd.dprint(self.color.red(f" 0x{value:016x}"), dml=True)
-                elif section.protect & (
-                        PageProtect.PAGE_READWRITE \
-                        | PageProtect.PAGE_WRITECOPY
-                    ):
-                    pykd.dprint(self.color.green(f" 0x{value:016x}"), dml=True)
-                else:
-                    pykd.dprint(self.color.white(f" 0x{value:016x}"), dml=True)
-                return
-        pykd.dprint(self.color.white(f" 0x{value:016x}"), dml=True)
-    
-    def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
-        printst: str = ""
-        self.colorize_print_by_priv(value)
-        if pykd.findSymbol(value) != hex(value)[2:]:
-            pykd.dprint(f" <{self.color.white(pykd.findSymbol(value))}>", dml=True)
-            
-        if pykd.isValid(value):
-            if remain == 0:
-                pykd.dprintln("")
-                return
-            else:
-                pykd.dprint(" ->", dml=True)
-                self.deep_print(self.memoryaccess.deref_ptr(value, self.ptrmask), remain - 1, value)
-                return
-        elif pykd.isValid(xref):
-            value: typing.Union[str, None] = self.memoryaccess.get_string(xref)
-            if value is None:
-                pykd.dprintln("")
-                return
 
-            if len(value):
-                pykd.dprintln(f'("{self.color.white(value)}")', dml=True)
-                return
-            else:
-                pykd.dprintln("")
-                return
-        else:
-            pykd.dprintln("")
-            return
-    
-    def print_general_regs(self) -> None:
-        for reg, vaule in asdict(self.regs).items():
-            pykd.dprint(self.color.red(f"{reg:4}"), dml=True)
-            pykd.dprint(f": ")
-            self.deep_print(vaule, 5)
-            
-    def print_seg_regs(self) -> None:
-        for reg, vaule in asdict(self.segregs).items():
-            pykd.dprint(f"{reg:2} = 0x{vaule:02x} ")
-        pykd.dprintln("")
-    
-    def print_eflags(self) -> None:
-        
-        for reg, vaule in asdict(self.eflags).items():
-            if vaule:
-                pykd.dprint(f"{self.color.green(str(EflagsEnum[reg]))} ", dml=True)
-            else:
-                pykd.dprint(f"{self.color.red(str(EflagsEnum[reg]))} ", dml=True)
-        pykd.dprintln("")
-        
-    def disasm(self, addr) -> typing.Tuple[str, str]:
-        """ disassemble, return opcodes and assembly string """
-        resp = pykd.disasm().disasm(addr).split(" ")
-        op_str = resp[1]
-        asm_str = ' '.join(c for c in resp[2::]).strip()
-        return op_str, asm_str
-
-    def print_code_by_address(self, pc: int, tab: str, print_range: int) -> None:
-
-        for _ in range(print_range):
-            op_str, asm_str = self.disasm(pc)
-            sym: str = self.memoryaccess.get_symbol(pc)
-            debug_info: str = ""
-            if sym is not None:
-                debug_info: str = f" <{sym}> "
-            code_str = f"{pc:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
-            pykd.dprintln(self.color.white(f"{tab}{code_str}"), dml=True)
-            
-            pc += len(op_str) // 2
-            
-            if asm_str.startswith("ret"):
-                return
-            
-    def print_code(self) -> None:
-        pc = self.regs.rip if self.arch == pykd.CPUType.AMD64 else self.regs.eip
-        for offset in range(-3, 6):
-            addr = pykd.disasm().findOffset(offset)
-            op_str, asm_str = self.disasm(addr)
-            sym: str = self.memoryaccess.get_symbol(addr)
-            debug_info: str = ""
-            if sym is not None:
-                debug_info: str = f" <{sym}> "
-            code_str = f"{addr:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
-            if addr == pc:
-                pykd.dprintln(self.color.bold_white(f"-> {code_str}"), dml=True)
-                
-                if asm_str.startswith("ret"):
-                    num: int 
-                    try:
-                        if asm_str.split(" ")[1].endswith("h"):
-                            num = int(f"0x{asm_str.split(' ')[1][:-1]}", 16)
-                        else:
-                            num = int(asm_str.split(" ")[1])
-                    except:
-                        num = 0
-                    goto: int = self.memoryaccess.deref_ptr(self.regs.rsp + num * 8 if self.arch == pykd.CPUType.AMD64 else self.regs.esp + num * 4, self.ptrmask)
-                    
-                    if goto is not None:
-                        self.print_code_by_address(goto, " "*8, 4)
-            else:
-                pykd.dprintln(self.color.white(f"   {code_str}"), dml=True)
-                
-    def print_stack(self) -> None:
-        sp = self.regs.rsp if self.arch == pykd.CPUType.AMD64 else self.regs.esp
-        
-        if self.arch == pykd.CPUType.I386:
-            for offset in range(8):
-                pykd.dprint(f"[sp + {offset*4:02x}] ")
-                addr = sp + offset * 4
-                self.deep_print(addr, 2)
-        else:
-            for offset in range(8):
-                pykd.dprint(f"[sp + {offset*8:02x}] ")
-                addr = sp + offset * 8
-                self.deep_print(addr, 2)
-            
-        
-    def print_regs(self) -> None:
-        self.print_general_regs()
-        self.print_seg_regs()
-        self.print_eflags()
-    
-    def conti(self, cnt: int = 1) -> None:
-        for _ in range(cnt):
-            pykd.dbgCommand("g")
-        self.print_context()
-        pykd.dbgCommand("c")
-    
-    def ni(self, cnt: int = 1) -> None:
-        for _ in range(cnt):
-            pykd.dbgCommand("p")
-        self.print_context()
-        pykd.dbgCommand("ni")
-    
-    def si(self, cnt: int = 1) -> None:
-        for _ in range(cnt):
-            pykd.dbgCommand("t")
-        self.print_context()
-        pykd.dbgCommand("si")
-        
 class PageState(enum.IntEnum):
     MEM_COMMIT = 0x1000
     MEM_RESERVE = 0x2000
@@ -605,6 +395,8 @@ class Vmmap():
                     pass
             if "Mapped file name:" in line:
                 section_info.mapped_file_name = line.split("name:")[1].strip().split(" ")[0]
+            if "Additional info:" in line:
+                section_info.mapped_file_name = line.split("info:")[1].strip()
             
         return section_info
     
@@ -697,10 +489,8 @@ class Vmmap():
                 if section_info.image_path != "":
                     path_info = section_info.image_path
             
-            if section_info.mapped_file_name == "MappedFile":
+            if section_info.mapped_file_name != "" and path_info == "":
                 path_info = section_info.mapped_file_name
-            elif path_info == "":
-                path_info = section_info.usage
 
             printst: str = ""
             if state_info == "commit":
@@ -710,16 +500,231 @@ class Vmmap():
             
             if level == 0 and color != self.color.gray:
                 pykd.dprint(color(printst), dml=True)
-                pykd.dprintln(f" {path_info}")
+                pykd.dprint(f" {section_info.usage}")
+                if path_info:
+                    pykd.dprintln(f" [{path_info}]")
+                else:
+                    pykd.dprintln("")
             elif level == 1:
                 pykd.dprint(color(printst), dml=True)
-                pykd.dprintln(f" {path_info}")
+                pykd.dprint(f" {section_info.usage}")
+                if path_info:
+                    pykd.dprintln(f" [{path_info}]")
+                else:
+                    pykd.dprintln("")
+class ContextManager():
+    
+    def __init__(self, vmmap: Vmmap, color: ColourManager):
+        self.arch = pykd.getCPUMode()
+        self.regs : typing.Union[Amd64Register, I386Register]
+        self.segregs : SegmentRegister = SegmentRegister()
+        self.eflags : EflagsRegister = EflagsRegister()
+        self.ptrmask: int = 0xffffffffffffffff if self.arch == pykd.CPUType.AMD64 else 0xffffffff
+        
+        self.color = color
+        self.vmmap = vmmap
+        
+        self.segments_info: typing.List[SectionInfo] = self.vmmap.dump_section()
+        
+        if self.arch == pykd.CPUType.AMD64:
+            self.regs = Amd64Register()
+        elif self.arch == pykd.CPUType.I386:
+            self.regs = I386Register()
+        else:
+            raise RuntimeError("Unsupported CPU mode")
+        
+    def update_regs(self):
+        for reg, _ in asdict(self.regs).items():
+            self.regs.assign(reg, pykd.reg(reg))
+        for reg, _ in asdict(self.segregs).items():
+            self.segregs.assign(reg, pykd.reg(reg))
+            
+    def update_eflags(self):
+        eflags = pykd.reg("efl")
+        for i, flaginfo in enumerate(asdict(self.eflags).items()):
+            self.eflags.assign(flaginfo[0], (((eflags >> EflagsEnum[flaginfo[0]]) & 1) == 1))
+            
+    def update_vmmap(self):
+        self.segments_info = self.vmmap.dump_section()
+        
+    def print_context(self):
+        self.update_regs()
+        self.update_eflags()
+        self.update_vmmap()
+        
+        pykd.dprintln(self.color.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
+        self.print_regs()
+        pykd.dprintln(self.color.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
+        self.print_code()
+        pykd.dprintln(self.color.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
+        self.print_stack()
+    
+    def colorize_print_by_priv(self, value) -> None:
+        for section in self.segments_info:
+            if section.base_address <= value <= section.end_address:
+                if section.usage == "Stack":
+                    pykd.dprint(self.color.purple(f" 0x{value:016x}"), dml=True)
+                elif section.protect & (
+                        PageProtect.PAGE_EXECUTE \
+                        | PageProtect.PAGE_EXECUTE_READ \
+                        | PageProtect.PAGE_EXECUTE_READWRITE \
+                        | PageProtect.PAGE_EXECUTE_WRITECOPY
+                    ):
+                    pykd.dprint(self.color.red(f" 0x{value:016x}"), dml=True)
+                elif section.protect & (
+                        PageProtect.PAGE_READWRITE \
+                        | PageProtect.PAGE_WRITECOPY
+                    ):
+                    pykd.dprint(self.color.green(f" 0x{value:016x}"), dml=True)
+                else:
+                    pykd.dprint(self.color.white(f" 0x{value:016x}"), dml=True)
+                return
+        pykd.dprint(self.color.white(f" 0x{value:016x}"), dml=True)
+    
+    def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
+        printst: str = ""
+        self.colorize_print_by_priv(value)
+        if memoryaccess.get_symbol(value) is not None:
+            pykd.dprint(f" <{self.color.white(memoryaccess.get_symbol(value))}>", dml=True)
+            
+        if pykd.isValid(value):
+            if remain == 0:
+                pykd.dprintln("")
+                return
+            else:
+                pykd.dprint(" ->", dml=True)
+                self.deep_print(memoryaccess.deref_ptr(value, self.ptrmask), remain - 1, value)
+                return
+        elif pykd.isValid(xref):
+            value: typing.Union[str, None] = memoryaccess.get_string(xref)
+            if value is None:
+                pykd.dprintln("")
+                return
+
+            if len(value):
+                pykd.dprintln(f'("{self.color.white(value)}")', dml=True)
+                return
+            else:
+                pykd.dprintln("")
+                return
+        else:
+            pykd.dprintln("")
+            return
+    
+    def print_general_regs(self) -> None:
+        for reg, vaule in asdict(self.regs).items():
+            pykd.dprint(self.color.red(f"{reg:4}"), dml=True)
+            pykd.dprint(f": ")
+            self.deep_print(vaule, 5)
+            
+    def print_seg_regs(self) -> None:
+        for reg, vaule in asdict(self.segregs).items():
+            pykd.dprint(f"{reg:2} = 0x{vaule:02x} ")
+        pykd.dprintln("")
+    
+    def print_eflags(self) -> None:
+        
+        for reg, vaule in asdict(self.eflags).items():
+            if vaule:
+                pykd.dprint(f"{self.color.green(str(EflagsEnum[reg]))} ", dml=True)
+            else:
+                pykd.dprint(f"{self.color.red(str(EflagsEnum[reg]))} ", dml=True)
+        pykd.dprintln("")
+        
+    def disasm(self, addr) -> typing.Tuple[str, str]:
+        resp = pykd.disasm().disasm(addr).split(" ")
+        op_str = resp[1]
+        asm_str = ' '.join(c for c in resp[2::]).strip()
+        return op_str, asm_str
+
+    def print_code_by_address(self, pc: int, tab: str, print_range: int) -> None:
+
+        for _ in range(print_range):
+            op_str, asm_str = self.disasm(pc)
+            sym: str = memoryaccess.get_symbol(pc)
+            debug_info: str = ""
+            if sym is not None:
+                debug_info: str = f" <{sym}> "
+            code_str = f"{pc:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
+            pykd.dprintln(self.color.white(f"{tab}{code_str}"), dml=True)
+            
+            pc += len(op_str) // 2
+            
+            if asm_str.startswith("ret"):
+                return
+            
+    def print_code(self) -> None:
+        pc = self.regs.rip if self.arch == pykd.CPUType.AMD64 else self.regs.eip
+        for offset in range(-3, 6):
+            addr = pykd.disasm().findOffset(offset)
+            op_str, asm_str = self.disasm(addr)
+            sym: str = memoryaccess.get_symbol(addr)
+            debug_info: str = ""
+            if sym is not None:
+                debug_info: str = f" <{sym}> "
+            code_str = f"{addr:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
+            if addr == pc:
+                pykd.dprintln(self.color.bold_white(f"-> {code_str}"), dml=True)
+                
+                if asm_str.startswith("ret"):
+                    num: int 
+                    try:
+                        if asm_str.split(" ")[1].endswith("h"):
+                            num = int(f"0x{asm_str.split(' ')[1][:-1]}", 16)
+                        else:
+                            num = int(asm_str.split(" ")[1])
+                    except:
+                        num = 0
+                    goto: int = memoryaccess.deref_ptr(self.regs.rsp + num * 8 if self.arch == pykd.CPUType.AMD64 else self.regs.esp + num * 4, self.ptrmask)
+                    
+                    if goto is not None:
+                        self.print_code_by_address(goto, " "*8, 4)
+            else:
+                pykd.dprintln(self.color.white(f"   {code_str}"), dml=True)
+                
+    def print_stack(self) -> None:
+        sp = self.regs.rsp if self.arch == pykd.CPUType.AMD64 else self.regs.esp
+        
+        if self.arch == pykd.CPUType.I386:
+            for offset in range(8):
+                pykd.dprint(f"[sp + {offset*4:02x}] ")
+                addr = sp + offset * 4
+                self.deep_print(addr, 2)
+        else:
+            for offset in range(8):
+                pykd.dprint(f"[sp + {offset*8:02x}] ")
+                addr = sp + offset * 8
+                self.deep_print(addr, 2)
+            
+        
+    def print_regs(self) -> None:
+        self.print_general_regs()
+        self.print_seg_regs()
+        self.print_eflags()
+    
+    def conti(self, cnt: int = 1) -> None:
+        pykd.dbgCommand(".cls")
+        for _ in range(cnt):
+            pykd.dbgCommand("g")
+        self.print_context()
+        pykd.dbgCommand("c")
+    
+    def ni(self, cnt: int = 1) -> None:
+        for _ in range(cnt):
+            pykd.dbgCommand("p")
+        self.print_context()
+        pykd.dbgCommand("ni")
+    
+    def si(self, cnt: int = 1) -> None:
+        for _ in range(cnt):
+            pykd.dbgCommand("t")
+        self.print_context()
+        pykd.dbgCommand("si")
 
 class SearchPattern():
-    def __init__(self):
-        self.vmmap = Vmmap()
-        self.color = ColourManager()
-        self.memoryaccess = MemoryAccess()
+    def __init__(self, vmmap: Vmmap, color: ColourManager):
+        self.color = color
+        self.vmmap = vmmap
         
         self.ptrmask: int = 0xffffffffffffffff if pykd.getCPUMode() == pykd.CPUType.AMD64 else 0xffffffff
     
@@ -820,7 +825,7 @@ class SearchPattern():
                     continue
                 
                 for addr in dump_result:
-                    hex_datas: typing.List[int] = self.memoryaccess.get_qword_str_data_by_ptr(addr)
+                    hex_datas: typing.List[int] = memoryaccess.get_qword_str_data_by_ptr(addr)
                     if once:
                         once = False
                         info: str = ""
@@ -877,7 +882,7 @@ class SearchPattern():
                     pykd.dprint(self.color.white(f"0x{(addr):016x}"), dml=True)
                     pykd.dprint(f":\t")
                     
-                    memval: bytes = self.memoryaccess.get_bytes(addr, 0x10)
+                    memval: bytes = memoryaccess.get_bytes(addr, 0x10)
                     
                     for ch in memval:
                         pykd.dprint(f"{ch:02x} ")
@@ -897,12 +902,17 @@ class SearchPattern():
     
     
 ## register commands
+
+memoryaccess: MemoryAccess = MemoryAccess()
+
 if __name__ == "__main__":
     
     cmd = CmdManager()
-    context = ContextManager()    
     vmmap = Vmmap()
-    search = SearchPattern()
+    color = ColourManager()
+    
+    context = ContextManager(vmmap, color)    
+    search = SearchPattern(vmmap, color)
     
     ## register commands
     cmd.alias("vmmap", "vmmap")
