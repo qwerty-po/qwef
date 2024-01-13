@@ -598,17 +598,9 @@ class ContextManager():
             if section.base_address <= value <= section.end_address:
                 if section.usage == "Stack":
                     pykd.dprint(self.color.purple(f" 0x{value:016x}"), dml=True)
-                elif section.protect & (
-                        PageProtect.PAGE_EXECUTE \
-                        | PageProtect.PAGE_EXECUTE_READ \
-                        | PageProtect.PAGE_EXECUTE_READWRITE \
-                        | PageProtect.PAGE_EXECUTE_WRITECOPY
-                    ):
+                elif PageProtect.is_executable(section.protect):
                     pykd.dprint(self.color.red(f" 0x{value:016x}"), dml=True)
-                elif section.protect & (
-                        PageProtect.PAGE_READWRITE \
-                        | PageProtect.PAGE_WRITECOPY
-                    ):
+                elif PageProtect.is_writable(section.protect):
                     pykd.dprint(self.color.green(f" 0x{value:016x}"), dml=True)
                 else:
                     pykd.dprint(self.color.white(f" 0x{value:016x}"), dml=True)
