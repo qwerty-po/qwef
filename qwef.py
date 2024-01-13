@@ -1057,7 +1057,14 @@ class SEH(TEB):
     
     def print_sehchain(self) -> None:
         self.sehchain = self.getSEHChain()
+        self.exceptone: bool = True
+        
         for sehinfo in self.sehchain:
+            if self.exceptone:
+                self.exceptone = False
+            else:
+                pykd.dprintln(f"     ↓")
+                
             if sehinfo.Next is None:
                 pykd.dprintln(f"0x{sehinfo.Curr:08x}: (chain is broken)")
                 return
