@@ -557,27 +557,27 @@ class Vmmap():
             type_info: str = ""
             path_info: str = ""
             
-            color: function = color.white
+            clr: function = colour.white
             
             if PageState.is_free(section_info.state):
-                color = color.gray
+                clr = colour.gray
                 state_info += 'free'
             elif PageState.is_reserve(section_info.state):
-                color = color.gray
+                clr = colour.gray
                 state_info += 'reserve'
             elif PageState.is_commit(section_info.state):
                 state_info += 'commit'
                 if PageProtect.is_guard(section_info.protect):
-                    color = color.gray
+                    clr = colour.gray
                     guard_info += '(g)'
                 elif PageProtect.is_executable(section_info.protect):
-                    color = color.red
+                    clr = colour.red
                 elif PageProtect.is_writable(section_info.protect):
-                    color = color.green
+                    clr = colour.green
                 elif PageProtect.is_readable(section_info.protect):
-                    color = color.white
+                    clr = colour.white
                 else:
-                    color = color.gray
+                    clr = colour.gray
                 
                 if PageProtect.is_copy_on_write(section_info.protect):
                     priv_info += 'c'
@@ -614,15 +614,15 @@ class Vmmap():
             elif state_info == "free" or state_info == "reserve":
                 printst = f"{addr_info} {state_info:11} {state_info}"
             
-            if level == 0 and color != color.gray:
-                pykd.dprint(color(printst), dml=True)
+            if level == 0 and clr != colour.gray:
+                pykd.dprint(clr(printst), dml=True)
                 pykd.dprint(f" {section_info.usage}")
                 if path_info:
                     pykd.dprintln(f" [{path_info}]")
                 else:
                     pykd.dprintln("")
             elif level == 1:
-                pykd.dprint(color(printst), dml=True)
+                pykd.dprint(clr(printst), dml=True)
                 pykd.dprint(f" {section_info.usage}")
                 if path_info:
                     pykd.dprintln(f" [{path_info}]")
@@ -666,32 +666,32 @@ class ContextManager():
         self.update_eflags()
         self.update_vmmap()
         
-        pykd.dprintln(color.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
+        pykd.dprintln(colour.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
         self.print_regs()
-        pykd.dprintln(color.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
+        pykd.dprintln(colour.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
         self.print_code()
-        pykd.dprintln(color.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
+        pykd.dprintln(colour.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
         self.print_stack()
     
     def colorize_print_by_priv(self, value) -> None:
         for section in self.segments_info:
             if section.base_address <= value <= section.end_address:
                 if section.usage == "Stack":
-                    pykd.dprint(color.purple(f" 0x{value:016x}"), dml=True)
+                    pykd.dprint(colour.purple(f" 0x{value:016x}"), dml=True)
                 elif PageProtect.is_executable(section.protect):
-                    pykd.dprint(color.red(f" 0x{value:016x}"), dml=True)
+                    pykd.dprint(colour.red(f" 0x{value:016x}"), dml=True)
                 elif PageProtect.is_writable(section.protect):
-                    pykd.dprint(color.green(f" 0x{value:016x}"), dml=True)
+                    pykd.dprint(colour.green(f" 0x{value:016x}"), dml=True)
                 else:
-                    pykd.dprint(color.white(f" 0x{value:016x}"), dml=True)
+                    pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
                 return
-        pykd.dprint(color.white(f" 0x{value:016x}"), dml=True)
+        pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
     
     def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
         printst: str = ""
         self.colorize_print_by_priv(value)
         if memoryaccess.get_symbol(value) is not None:
-            pykd.dprint(f" <{color.white(memoryaccess.get_symbol(value))}>", dml=True)
+            pykd.dprint(f" <{colour.white(memoryaccess.get_symbol(value))}>", dml=True)
             
         if pykd.isValid(value):
             if remain == 0:
@@ -708,7 +708,7 @@ class ContextManager():
                 return
 
             if len(value):
-                pykd.dprintln(f'("{color.white(value)}")', dml=True)
+                pykd.dprintln(f'("{colour.white(value)}")', dml=True)
                 return
             else:
                 pykd.dprintln("")
@@ -719,7 +719,7 @@ class ContextManager():
     
     def print_general_regs(self) -> None:
         for reg, vaule in asdict(self.regs).items():
-            pykd.dprint(color.red(f"{reg:4}"), dml=True)
+            pykd.dprint(colour.red(f"{reg:4}"), dml=True)
             pykd.dprint(f": ")
             self.deep_print(vaule, 5)
             
@@ -732,9 +732,9 @@ class ContextManager():
         
         for reg, vaule in asdict(self.eflags).items():
             if vaule:
-                pykd.dprint(f"{color.green(str(EflagsEnum[reg]))} ", dml=True)
+                pykd.dprint(f"{colour.green(str(EflagsEnum[reg]))} ", dml=True)
             else:
-                pykd.dprint(f"{color.red(str(EflagsEnum[reg]))} ", dml=True)
+                pykd.dprint(f"{colour.red(str(EflagsEnum[reg]))} ", dml=True)
         pykd.dprintln("")
         
     def disasm(self, addr) -> typing.Tuple[str, str]:
@@ -752,7 +752,7 @@ class ContextManager():
             if sym is not None:
                 debug_info: str = f" <{sym}> "
             code_str = f"{pc:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
-            pykd.dprintln(color.white(f"{tab}{code_str}"), dml=True)
+            pykd.dprintln(colour.white(f"{tab}{code_str}"), dml=True)
             
             pc += len(op_str) // 2
             
@@ -770,7 +770,7 @@ class ContextManager():
                 debug_info: str = f" <{sym}> "
             code_str = f"{addr:#x}: {op_str:25s}{debug_info:20s}{asm_str}"
             if addr == pc:
-                pykd.dprintln(color.bold_white(f"-> {code_str}"), dml=True)
+                pykd.dprintln(colour.bold_white(f"-> {code_str}"), dml=True)
                 
                 if asm_str.startswith("ret"):
                     num: int 
@@ -786,7 +786,7 @@ class ContextManager():
                     if goto is not None:
                         self.print_code_by_address(goto, " "*8, 4)
             else:
-                pykd.dprintln(color.white(f"   {code_str}"), dml=True)
+                pykd.dprintln(colour.white(f"   {code_str}"), dml=True)
                 
     def print_stack(self) -> None:
         sp = self.regs.rsp if self.arch == pykd.CPUType.AMD64 else self.regs.esp
@@ -831,7 +831,7 @@ class SearchPattern():
         self.ptrmask: int = 0xffffffffffffffff if pykd.getCPUMode() == pykd.CPUType.AMD64 else 0xffffffff
     
     def help(self):
-        pykd.dprintln(color.white("[-] Usage: find [pattern](int, 0x, 0o, 0b, dec, str)"), dml=True)
+        pykd.dprintln(colour.white("[-] Usage: find [pattern](int, 0x, 0o, 0b, dec, str)"), dml=True)
         
     def find_int(self, start, end, search_value, inputsize) -> typing.List[int]:
         dumped_pattern: str = ""
@@ -904,11 +904,11 @@ class SearchPattern():
                 tmp = tmp >> 8
                 inputsize += 1
             if inputsize > 8:
-                pykd.dprintln(color.white("[-] Invalid pattern (too long)"), dml=True)
+                pykd.dprintln(colour.white("[-] Invalid pattern (too long)"), dml=True)
                 self.help()
                 return
 
-            pykd.dprintln(color.white(f"[+] Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
             
             for section in vmmap.dump_section():
                 once: bool = True
@@ -938,8 +938,8 @@ class SearchPattern():
                         else:
                             info = section.usage
                         print(type(section.protect))
-                        pykd.dprintln(f"[+] In '{color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
-                    pykd.dprint(color.white(f"0x{(section.base_address + offset):016x}"), dml=True)
+                        pykd.dprintln(f"[+] In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
+                    pykd.dprint(colour.white(f"0x{(section.base_address + offset):016x}"), dml=True)
                     pykd.dprint(f":\t")
                 
                     for data in hex_datas:
@@ -955,10 +955,10 @@ class SearchPattern():
                                 pykd.dprint(".")
                     pykd.dprintln(" |")
                             
-            pykd.dprintln(color.white(f"[+] Searching pattern finished"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Searching pattern finished"), dml=True)
         
         else:
-            pykd.dprintln(color.white(f"[+] Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
             
             for section in vmmap.dump_section():
                 once: bool = True
@@ -980,8 +980,8 @@ class SearchPattern():
                             info = section.additional
                         else:
                             info = section.usage
-                        pykd.dprintln(f"[+] In '{color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
-                    pykd.dprint(color.white(f"0x{(addr):016x}"), dml=True)
+                        pykd.dprintln(f"[+] In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
+                    pykd.dprint(colour.white(f"0x{(addr):016x}"), dml=True)
                     pykd.dprint(f":\t")
                     
                     memval: bytes = memoryaccess.get_bytes(addr, 0x10)
@@ -999,18 +999,92 @@ class SearchPattern():
                             pykd.dprint(".")
                     pykd.dprintln(" |")
                     
-            pykd.dprintln(color.white(f"[+] Searching pattern finished"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Searching pattern finished"), dml=True)
+
+class TEB():
+    def __init__(self):
+        tebaddress: int = self.getTEBAddress()
+
+    # https://github.com/corelan/windbglib/blob/d20b3036547886ff6beb616d24927febfa491e93/windbglib.py#L177
+    def getTEBAddress(self) -> typing.Union[int, None]:
+        try:
+            tebinfo = pykd.dbgCommand("!teb")
+            tebline = tebinfo.split("\n")[0]
+            tebparts = tebline.split(" ")[2]
+            return int(f"0x{tebparts}", 16)
+        except:
+            return None
+
+class SEHInfo():
+    Curr: int
+    Next: int
+    Handler: int
     
+    def __init__(self, ptr):
+        self.Curr: int = ptr
+        self.Next: typing.Union[int, None] = None 
+        self.Handler: typing.Union[int, None] = None
+        
+        self.Next = memoryaccess.deref_ptr(ptr, context.ptrmask)
+        self.Handler = memoryaccess.deref_ptr(ptr + 4, context.ptrmask)
+
+class SEH(TEB):
+    def __init__(self):
+        self.sehchain: typing.List[SEHInfo] = self.getSEHChain()
+    
+    def getSEHChain(self) -> typing.List[SEHInfo]:
+        self.sehchain = []
+        
+        if context.arch != pykd.CPUType.I386:
+            return self.sehchain
+        
+        tebaddress: int = self.getTEBAddress()
+        if tebaddress is None:
+            return self.sehchain
+        
+        currseh_ptr: int = pykd.ptrPtr(tebaddress)
+        if currseh_ptr == 0:
+            return self.sehchain
+        else:
+            self.sehchain.append(SEHInfo(currseh_ptr))
+        
+        while True:
+            self.sehchain.append(SEHInfo(self.sehchain[-1].Next))
+            if self.sehchain[-1].Next == context.ptrmask or self.sehchain[-1].Next == None:
+                break
+        
+        return self.sehchain
+    
+    def print_sehchain(self) -> None:
+        self.sehchain = self.getSEHChain()
+        for sehinfo in self.sehchain:
+            if sehinfo.Next is None:
+                pykd.dprintln(f"0x{sehinfo.Curr:08x}: (chain is broken)")
+                return
+            elif sehinfo.Next is not context.ptrmask:
+                if memoryaccess.get_symbol(sehinfo.Handler) is not None:
+                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <{memoryaccess.get_symbol(sehinfo.Handler)}>")
+                elif not pykd.isValid(sehinfo.Handler):
+                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <invalid address>")
+                else:
+                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x}")
+            else:
+                pykd.dprintln(f"(end of chain)")
+                return
+
+                
+
 ## register commands
 cmd: CmdManager = CmdManager()
 
 memoryaccess: MemoryAccess = MemoryAccess()
-color: ColourManager = ColourManager()
+colour: ColourManager = ColourManager()
 context: ContextManager = ContextManager()    
 
 vmmap: Vmmap = Vmmap()
 
 search: SearchPattern = SearchPattern()
+seh: SEH = SEH()
 
 if __name__ == "__main__":
     
@@ -1022,6 +1096,7 @@ if __name__ == "__main__":
     cmd.alias("si", "si")
     cmd.alias("find", "find")
     cmd.alias("view", "view")
+    cmd.alias("sehview", "sehview")
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
@@ -1060,3 +1135,5 @@ if __name__ == "__main__":
                 search.find(sys.argv[2], int(sys.argv[3], 16), int(sys.argv[4], 16))
             else:
                 search.help()
+        elif command == "sehview":
+            seh.print_sehchain()
