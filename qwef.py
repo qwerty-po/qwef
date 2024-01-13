@@ -201,13 +201,30 @@ class MemoryAccess():
     def __init__(self):
         self.addr_symbol: typing.Dict[int, str] = {}
     
-    def deref_ptr(self, ptr, mask) -> typing.Union[int, None]:
+    def deref_ptr(self, ptr: int, mask: int) -> typing.Union[int, None]:
+        """dereference pointer
+
+        Args:
+            ptr (int): pointer address
+            mask (int): masking based on pointer size
+
+        Returns:
+            typing.Union[int, None]: dereferenced pointer or None
+        """
         try:
             return pykd.loadPtrs(ptr, 1)[0] & mask
         except pykd.MemoryException:
             return None
         
-    def get_string(self, ptr) -> typing.Union[str, None]:
+    def get_string(self, ptr: int) -> typing.Union[str, None]:
+        """load ASCII string (if not return error)
+
+        Args:
+            ptr (int): pointer address
+
+        Returns:
+            typing.Union[str, None]: string or None
+        """
         try:
             return pykd.loadCStr(ptr)
         except pykd.MemoryException:
@@ -215,15 +232,30 @@ class MemoryAccess():
         except UnicodeDecodeError:
             return None
     
-    def get_bytes(self, ptr, size) -> typing.Union[bytes, None]:
+    def get_bytes(self, ptr: int, size: int) -> typing.Union[bytes, None]:
+        """load bytes given siez
+
+        Args:
+            ptr (int): pointer address
+            size (int): size of bytes
+
+        Returns:
+            typing.Union[bytes, None]: bytes or None
+        """
         try:
             return pykd.loadBytes(ptr, size)
         except pykd.MemoryException:
             return None
-        except UnicodeDecodeError:
-            return None
         
-    def get_symbol(self, ptr) -> typing.Union[str, None]:
+    def get_symbol(self, ptr: int) -> typing.Union[str, None]:
+        """get symbol name if exist
+
+        Args:
+            ptr (int): pointer address
+
+        Returns:
+            typing.Union[str, None]: symbol name or None (it would be saved in self.addr_symbol)
+        """
         if ptr in self.addr_symbol:
             return self.addr_symbol[ptr]
         try:
@@ -237,7 +269,19 @@ class MemoryAccess():
         except pykd.MemoryException:
             return None
     
-    def get_qword_str_data_by_ptr(self, ptr: int, size: int = 0x10) -> typing.List[int]:
+    def get_qword_datas(self, ptr: int, size: int = 0x10) -> typing.List[int]:
+        """get data(qword) from ptr (if not return error)
+
+        Args:
+            ptr (int): pointer address
+            size (int, optional): get size. Defaults to 0x10.
+
+        Raises:
+            Exception: _description_
+
+        Returns:
+            typing.List[int]: _description_
+        """
         retlist: typing.List[int] = []
         for val in pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}").replace("`", "").split("  ")[1].strip().split(" "):
             try:
@@ -850,7 +894,7 @@ class SearchPattern():
                     continue
                 
                 for addr in dump_result:
-                    hex_datas: typing.List[int] = memoryaccess.get_qword_str_data_by_ptr(addr)
+                    hex_datas: typing.List[int] = memoryaccess.get_qword_datas(addr)
                     if once:
                         once = False
                         info: str = ""
