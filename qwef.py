@@ -473,7 +473,7 @@ class SectionInfo:
     end_address: int
     size: int
     image_path: str
-    mapped_file_name: str
+    additional: str
     state: PageState
     protect: PageProtect
     type: PageType
@@ -484,7 +484,7 @@ class SectionInfo:
         self.end_address: int = -1
         self.size: int = -1
         self.image_path: str = ""
-        self.mapped_file_name: str = ""
+        self.additional: str = ""
         self.state: PageState = PageState.MEM_FREE
         self.protect: PageProtect = PageProtect.PAGE_NOACCESS
         self.type: PageType = PageType.MEM_PRIVATE
@@ -527,9 +527,9 @@ class Vmmap():
                 except:
                     pass
             if "Mapped file name:" in line:
-                section_info.mapped_file_name = line.split("name:")[1].strip().split(" ")[0]
+                section_info.additional = line.split("name:")[1].strip().split(" ")[0]
             if "Additional info:" in line:
-                section_info.mapped_file_name = line.split("info:")[1].strip()
+                section_info.additional = line.split("info:")[1].strip()
             
         return section_info
     
@@ -605,8 +605,8 @@ class Vmmap():
                 if section_info.image_path != "":
                     path_info = section_info.image_path
             
-            if section_info.mapped_file_name != "" and path_info == "":
-                path_info = section_info.mapped_file_name
+            if section_info.additional != "" and path_info == "":
+                path_info = section_info.additional
 
             printst: str = ""
             if state_info == "commit":
@@ -938,8 +938,8 @@ class SearchPattern():
                         info: str = ""
                         if section.image_path != "":
                             info = section.image_path
-                        elif section.mapped_file_name != "":
-                            info = section.mapped_file_name
+                        elif section.additional != "":
+                            info = section.additional
                         else:
                             info = section.usage
                         print(type(section.protect))
@@ -981,8 +981,8 @@ class SearchPattern():
                         info: str = ""
                         if section.image_path != "":
                             info = section.image_path
-                        elif section.mapped_file_name != "":
-                            info = section.mapped_file_name
+                        elif section.additional != "":
+                            info = section.additional
                         else:
                             info = section.usage
                         pykd.dprintln(f"[+] In '{self.color.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
