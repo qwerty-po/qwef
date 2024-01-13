@@ -297,6 +297,26 @@ class PageState(enum.IntEnum):
     
     def __str__(self) -> str:
         return self.name
+
+    def is_commit(enum_value: int) -> bool:
+        if enum_value & PageState.MEM_COMMIT:
+            return True
+        else:
+            return False
+    
+    def is_reserve(enum_value: int) -> bool:
+        if enum_value & PageState.MEM_RESERVE:
+            return True
+        else:
+            return False
+    
+    def is_free(enum_value: int) -> bool:
+        if enum_value & PageState.MEM_FREE:
+            return True
+        else:
+            return False
+        
+    
 class PageProtect(enum.IntEnum):
     PAGE_NOACCESS = 0x01
     PAGE_READONLY = 0x02
@@ -417,6 +437,24 @@ class PageType(enum.IntEnum):
     def __str__(self) -> str:
         return self.name
     
+    def is_image(enum_value) -> bool:
+        if enum_value & PageType.MEM_IMAGE:
+            return True
+        else:
+            return False
+    
+    def is_mapped(enum_value) -> bool:
+        if enum_value & PageType.MEM_MAPPED:
+            return True
+        else:
+            return False
+    
+    def is_private(enum_value) -> bool:
+        if enum_value & PageType.MEM_PRIVATE:
+            return True
+        else:
+            return False
+    
     def to_str(self, enum_value) -> str:
         retstr: str = ""
         if enum_value & PageType.MEM_IMAGE:
@@ -521,13 +559,13 @@ class Vmmap():
             
             color: function = self.color.white
             
-            if section_info.state & PageState.MEM_FREE:
+            if PageState.is_free(section_info.state):
                 color = self.color.gray
                 state_info += 'free'
-            elif section_info.state & PageState.MEM_RESERVE:
+            elif PageState.is_reserve(section_info.state):
                 color = self.color.gray
                 state_info += 'reserve'
-            elif section_info.state & PageState.MEM_COMMIT:
+            elif PageState.is_commit(section_info.state):
                 state_info += 'commit'
                 if PageProtect.is_guard(section_info.protect):
                     color = self.color.gray
@@ -536,7 +574,7 @@ class Vmmap():
                     color = self.color.red
                 elif PageProtect.is_writable(section_info.protect):
                     color = self.color.green
-                elif section_info.protect & PageProtect.PAGE_READONLY:
+                elif PageProtect.is_readable(section_info.protect):
                     color = self.color.white
                 else:
                     color = self.color.gray
@@ -558,11 +596,11 @@ class Vmmap():
                 else:
                     priv_info += '-'
 
-            if section_info.type & PageType.MEM_MAPPED:
+            if PageType.is_mapped(section_info.type):
                 type_info += 's'
-            elif section_info.type & PageType.MEM_PRIVATE:
+            elif PageType.is_private(section_info.type):
                 type_info += 'p'
-            elif section_info.type & PageType.MEM_IMAGE:
+            elif PageType.is_image(section_info.type):
                 type_info += 'i'
                 if section_info.image_path != "":
                     path_info = section_info.image_path
@@ -885,7 +923,7 @@ class SearchPattern():
                     continue
                 if section.base_address > end:
                     break
-                if section.state & PageState.MEM_FREE or section.state & PageState.MEM_RESERVE:
+                if PageState.is_free(section.state) or PageState.is_reserve(section.state):
                     continue
                 
                 dump_result: typing.List[int] = self.find_int(section.base_address, section.end_address, search_value, inputsize)
@@ -934,7 +972,7 @@ class SearchPattern():
                     continue
                 if section.base_address > end:
                     break
-                if section.state & PageState.MEM_FREE or section.state & PageState.MEM_RESERVE:
+                if PageState.is_free(section.state) or PageState.is_reserve(section.state):
                     continue
                 
                 for addr in self.find_str(section.base_address, section.end_address, search_value):
