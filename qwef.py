@@ -1142,5 +1142,11 @@ if __name__ == "__main__":
                 search.find(sys.argv[2], int(sys.argv[3], 16), int(sys.argv[4], 16))
             else:
                 search.help()
-        elif command == "sehview":
-            seh.print_sehchain()
+        elif command == "seh":
+            if len(sys.argv) == 2 or len(sys.argv) > 3:
+                pykd.dprintln("[-] Usage: seh [view, ...]")
+            if len(sys.argv) == 3:
+                if sys.argv[2] == "view":
+                    seh.print_sehchain()
+                elif sys.argv[2] == "?":
+                    pykd.dprintln("[-] Usage: seh [view, ...]")
