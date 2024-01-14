@@ -1103,7 +1103,7 @@ if __name__ == "__main__":
     cmd.alias("si", "si")
     cmd.alias("find", "find")
     cmd.alias("view", "view")
-    cmd.alias("sehview", "sehview")
+    cmd.alias("seh", "seh")
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
