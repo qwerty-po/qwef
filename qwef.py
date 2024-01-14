@@ -1107,9 +1107,93 @@ class SEH(TEB):
                 if sehinfo.Next == context.ptrmask:
                     pykd.dprintln(f"     ↓\n(end of chain)")
 
+class NTHeap():
+    def __init__(self):
+        pass
+        
+    def _HEAPInfo(self, heap_address: int) -> nt.typedVar("_HEAP", int):
+        return nt.typedVar("_HEAP", heap_address)
+    
+    def get_freelist(self, heap_address: int) -> typing.List[int]:
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        freelist: typing.List[int] = []
+        
+        if heap.FreeLists.Flink == heap.FreeLists.Blink:
+            return freelist
+        else:
+            freelist.append(int(heap.FreeLists))
+            next_list = nt.typedVar("_LIST_ENTRY", int(heap.FreeLists.Flink))
+            while True:
+                freelist.append(int(next_list))
+                if not pykd.isValid(next_list):
+                    break
+                elif next_list == heap.FreeLists:
+                    break
+                next_list = nt.typedVar("_LIST_ENTRY", next_list.Flink)
+        return freelist
+    
+    def is_valid_smalltagindex(self, chunk, encoding) -> int:
+        if context.arch == pykd.CPUType.I386:
+            checker: int = 0
+            for ch in (int(chunk.Size) ^ int(encoding.Size)).to_bytes(2, byteorder="little"):
+                checker ^= ch
+            for ch in (int(chunk.Flags) ^ int(encoding.Flags)).to_bytes(1, byteorder="little"):
+                checker ^= ch
+            for ch in (int(chunk.SmallTagIndex) ^ int(encoding.SmallTagIndex)).to_bytes(1, byteorder="little"):
+                checker ^= ch
+            return checker
+                        
+        
+    def print_freelist(self, heap_address: int) -> None:
+        heap = self._HEAPInfo(heap_address)
+        freelist = self.get_freelist(heap_address)
+        
+        if freelist == []:
+            pykd.dprintln(colour.white("[-] Heap is empty"), dml=True)
+            return
+
+        if context.arch == pykd.CPUType.I386:
+            pykd.dprintln(colour.white(f"[+] Heap freelist (0x{heap_address:08x})"), dml=True)
+            for i, addr in enumerate(freelist):
+                linked_list = nt.typedVar("_LIST_ENTRY", addr)
+                linked_list_addr = addr
+                
+                addr -= nt.sizeof("_HEAP_ENTRY")
+                chunk = nt.typedVar("_HEAP_ENTRY", addr)
+                encoding = heap.Encoding
+                
+                if not pykd.isValid(linked_list):
+                    pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
+                    pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
+                else:
+                    pykd.dprint(colour.white(f"0x{addr:08x} | Flink: 0x{int(linked_list.Flink):08x} / Blink: 0x{int(linked_list.Blink):08x} |"), dml=True)
+                    if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
+                        pass
+                    else:
+                        pykd.dprint(colour.white(f" Size: 0x{((chunk.Size ^ encoding.Size)<<3):04x} , PrevSize: 0x{((chunk.PreviousSize ^ encoding.PreviousSize) << 3):04x}"), dml=True)
+                    
+                        checker = self.is_valid_smalltagindex(chunk, encoding)
+                        if checker != 0:
+                            pykd.dprint(colour.red(f" (encoding error, 0x != 0x{checker:02x})"), dml=True)
+                    
+                    pykd.dprintln("")
+                    
+                if i != len(freelist) - 1:
+                    if linked_list.Flink.Blink != linked_list_addr:
+                        if not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list_addr:
+                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk, next_chunk->Blink->Flink != next_chunk)"), dml=True)
+                        else:
+                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk)"), dml=True)
+                    elif not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list.Flink:
+                        pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
+                    else:
+                        pykd.dprintln(f"     ↕️")
+            pykd.dprintln(colour.white(f"[+] Heap freelist finished"), dml=True)
+    
 class Heap(PEB):
     def __init__(self):
         self.heaps: typing.List[int] = self.get_heaps_address()
+        self.NtHeap: NTHeap = NTHeap()
         pass
 
     def get_heaps_address(self) -> typing.List[int]:
@@ -1119,16 +1203,6 @@ class Heap(PEB):
         for i in range(peb.NumberOfHeaps):
             self.heaps.append(memoryaccess.deref_ptr(peb.ProcessHeaps + i*4, context.ptrmask))
         return self.heaps
-
-    class NTHeap():
-        def __init__(self):
-            pass
-            
-        def _HEAPInfo(self, heap: int) -> typing.Union[nt.typedVar("_HEAP", int), None]:
-            try:
-                return nt.typedVar("_HEAP", heap)
-            except:
-                return None
 
 ## register commands
 cmd: CmdManager = CmdManager()
@@ -1153,8 +1227,7 @@ if __name__ == "__main__":
     cmd.alias("find", "find")
     cmd.alias("view", "view")
     cmd.alias("seh", "seh")
-    
-    print(heap.NTHeap._HEAPInfo(heap.get_heaps_address()[0]))
+    cmd.alias("heap", "heap")
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
@@ -1201,3 +1274,23 @@ if __name__ == "__main__":
                     seh.print_sehchain()
                 elif sys.argv[5] == "?":
                     pykd.dprintln("[-] Usage: seh [view, ...]")
+        elif command == "heap":
+            if len(sys.argv) == 2:
+                pykd.dprintln("[-] Usage: heap [freelist, ...]")
+            
+            elif len(sys.argv) == 3:
+                if sys.argv[2] == "freelist":
+                    for heap_address in heap.get_heaps_address():
+                        heap.NtHeap.print_freelist(heap_address)
+                elif sys.argv[2] == "?":
+                    pykd.dprintln("[-] Usage: heap [freelist, ...]")
+            
+            elif len(sys.argv) == 4:
+                if sys.argv[2] == "freelist":
+                    heap.NtHeap.print_freelist(heap.get_heaps_address()[int(sys.argv[3])])
+                elif sys.argv[2] == "?":
+                    pykd.dprintln("[-] Usage: heap [freelist, ...]")
+
+            else:
+                pykd.dprintln("[-] Usage: heap [freelist, ...]")
+            
