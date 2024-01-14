@@ -1143,10 +1143,10 @@ if __name__ == "__main__":
             else:
                 search.help()
         elif command == "seh":
-            if len(sys.argv) == 2 or len(sys.argv) > 3:
+            if len(sys.argv) == 2:
                 pykd.dprintln("[-] Usage: seh [view, ...]")
-            if len(sys.argv) == 3:
-                if sys.argv[2] == "view":
+            if len(sys.argv) == 6:
+                if sys.argv[5] == "view":
                     seh.print_sehchain()
-                elif sys.argv[2] == "?":
+                elif sys.argv[5] == "?":
                     pykd.dprintln("[-] Usage: seh [view, ...]")
