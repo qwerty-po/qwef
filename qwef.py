@@ -1314,7 +1314,7 @@ class PEB():
                 self.ExtendedFeatureDisableMask = int.from_bytes(bytes_data[0x480:0x484], byteorder="little")
         
     def __init__(self):
-        peb: self.PEBInfo
+        self.peb: self.PEBInfo
         
         self.getPEBInfo()
     
