@@ -1403,12 +1403,18 @@ class SEH(TEB):
                 if sehinfo.Next == context.ptrmask:
                     pykd.dprintln(f"     ↓\n(end of chain)")
 
-class Heap():
+class Heap(PEB):
     def __init__(self):
+        self.heaps: typing.List[int] = self.get_heaps_address()
         pass
 
-    def get_heaps_address(self):
-        pass
+    def get_heaps_address(self) -> typing.List[int]:
+        peb: PEB.PEBInfo = self.getPEBInfo()
+        self.heaps = []
+        
+        for i in range(peb.NumberOfHeaps):
+            self.heaps.append(memoryaccess.deref_ptr(peb.ProcessHeaps + i*4, context.ptrmask))
+        return self.heaps
                 
 
 ## register commands
@@ -1419,8 +1425,6 @@ colour: ColourManager = ColourManager()
 context: ContextManager = ContextManager()    
 
 vmmap: Vmmap = Vmmap()
-
-peb: PEB = PEB()
 search: SearchPattern = SearchPattern()
 seh: SEH = SEH()
 heap: Heap = Heap()
@@ -1436,8 +1440,6 @@ if __name__ == "__main__":
     cmd.alias("find", "find")
     cmd.alias("view", "view")
     cmd.alias("seh", "seh")
-    
-    peb.getPEBInfo()
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
