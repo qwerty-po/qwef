@@ -1006,7 +1006,7 @@ class ListEntry():
     Flink: int
     Blink: int
     
-    def __init__(self, Flink: int, Blink: int) -> None
+    def __init__(self, Flink: int, Blink: int) -> None:
         self.Flink: int = Flink
         self.Blink: int = Blink
 
@@ -1205,6 +1205,7 @@ class PEB():
                 self.TlsExpansionCounter = int.from_bytes(bytes_data[0x03c:0x040], byteorder="little")
                 self.TlsBitmap = int.from_bytes(bytes_data[0x040:0x044], byteorder="little")
                 
+                self.TlsBitmapBits = []
                 for i in range(0x044, 0x04c, 0x4):
                     self.TlsBitmapBits.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
                 
@@ -1239,11 +1240,14 @@ class PEB():
                 self.ImageSubsystemMinorVersion = int.from_bytes(bytes_data[0x0bc:0x0c0], byteorder="little")
                 self.ActiveProcessAffinityMask = int.from_bytes(bytes_data[0x0c0:0x0c4], byteorder="little")
                 
+                self.GdiHandleBuffer = []
                 for i in range(0x0c4, 0x14c, 0x4):
                     self.GdiHandleBuffer.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
                 
                 self.PostProcessInitRoutine = int.from_bytes(bytes_data[0x14c:0x150], byteorder="little")
                 self.TlsExpansionBitmap = int.from_bytes(bytes_data[0x150:0x154], byteorder="little")
+                
+                self.TlsExpansionBitmapBits = []
                 for i in range(0x154, 0x1d4, 0x4):
                     self.TlsExpansionBitmapBits.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
                     
@@ -1267,6 +1271,7 @@ class PEB():
                 self.SystemAssemblyStorageMap = int.from_bytes(bytes_data[0x204:0x208], byteorder="little")
                 self.MinimumStackCommit = int.from_bytes(bytes_data[0x208:0x20c], byteorder="little")
                 
+                self.SparePointers = []
                 for i in range(0x20c, 0x214, 0x4):
                     self.SparePointers.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
 
@@ -1274,6 +1279,7 @@ class PEB():
                 self.ChpeV2ProcessInfo = int.from_bytes(bytes_data[0x218:0x21c], byteorder="little")
                 self.AppModelFeatureState = int.from_bytes(bytes_data[0x21c:0x220], byteorder="little")
                 
+                self.SpareUlongs = []
                 for i in range(0x220, 0x228, 0x4):
                     self.SpareUlongs.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
                     
@@ -1296,6 +1302,7 @@ class PEB():
                 self.TppWorkerpListLock = int.from_bytes(bytes_data[0x250:0x254], byteorder="little")
                 self.TppWorkerpList = ListEntry(int.from_bytes(bytes_data[0x254:0x258], byteorder="little"), int.from_bytes(bytes_data[0x258:0x25c], byteorder="little"))
                 
+                self.WaitOnAddressHashTable = []
                 for i in range(0x25c, 0x45c, 0x4):
                     self.WaitOnAddressHashTable.append(int.from_bytes(bytes_data[i:i+4], byteorder="little"))
                 
@@ -1413,6 +1420,7 @@ context: ContextManager = ContextManager()
 
 vmmap: Vmmap = Vmmap()
 
+peb: PEB = PEB()
 search: SearchPattern = SearchPattern()
 seh: SEH = SEH()
 heap: Heap = Heap()
@@ -1428,6 +1436,8 @@ if __name__ == "__main__":
     cmd.alias("find", "find")
     cmd.alias("view", "view")
     cmd.alias("seh", "seh")
+    
+    peb.getPEBInfo()
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
