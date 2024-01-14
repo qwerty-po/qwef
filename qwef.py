@@ -8,6 +8,8 @@ import string
 
 from dataclasses import dataclass, fields, asdict
 
+nt = pykd.module("ntdll")
+
 def p64(value: int) -> bytes:
     return value.to_bytes(8, byteorder="little")
 
@@ -1117,15 +1119,23 @@ class Heap(PEB):
         for i in range(peb.NumberOfHeaps):
             self.heaps.append(memoryaccess.deref_ptr(peb.ProcessHeaps + i*4, context.ptrmask))
         return self.heaps
-                
+
+    class NTHeap():
+        def __init__(self):
+            pass
+            
+        def _HEAPInfo(self, heap: int) -> typing.Union[nt.typedVar("_HEAP", int), None]:
+            try:
+                return nt.typedVar("_HEAP", heap)
+            except:
+                return None
 
 ## register commands
 cmd: CmdManager = CmdManager()
 
 memoryaccess: MemoryAccess = MemoryAccess()
 colour: ColourManager = ColourManager()
-context: ContextManager = ContextManager()    
-nt = pykd.module("ntdll")
+context: ContextManager = ContextManager() 
 
 vmmap: Vmmap = Vmmap()
 search: SearchPattern = SearchPattern()
@@ -1143,6 +1153,8 @@ if __name__ == "__main__":
     cmd.alias("find", "find")
     cmd.alias("view", "view")
     cmd.alias("seh", "seh")
+    
+    print(heap.NTHeap._HEAPInfo(heap.get_heaps_address()[0]))
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
