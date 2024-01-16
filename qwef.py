@@ -3,6 +3,7 @@ import os
 import sys
 import pykd
 import enum
+import math
 import typing
 import string
 
@@ -67,6 +68,22 @@ class ColourManager():
 
     def bold_white(self, content): 
         return self.bold_colorize(self.WHITE, content)
+    
+    def colorize_by_address_priv(self, target: str, address: int) -> str:
+        if pykd.isValid(address):
+            for section in vmmap.dump_section():
+                if section.base_address <= address <= section.end_address:
+                    if section.usage == "Stack":
+                        return self.purple(target)
+                    elif PageProtect.is_executable(section.protect):
+                        return self.red(target)
+                    elif PageProtect.is_writable(section.protect):
+                        return self.green(target)
+                    else:
+                        return self.white(target)
+            return self.white(target)
+        else:
+            return self.white(target)
 
 # class I386RegisterEnum(enum.IntEnum):
 #     eax = 0; ebx = 1; ecx = 2; edx = 3
@@ -1132,6 +1149,24 @@ class NTHeap():
                 next_list = nt.typedVar("_LIST_ENTRY", next_list.Flink)
         return freelist
     
+    def get_blockindex(self, heap_address: int) -> nt.typedVar("_HEAP_LIST_LOOKUP", int):
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        return nt.typedVar("_HEAP_LIST_LOOKUP", int(heap.BlocksIndex))  
+    
+    def get_listhint(self, heap_address: int) -> typing.List[typing.Tuple[bool, int]]:
+        blockindex: nt.typedVar("_HEAP_LIST_LOOKUP") = self.get_blockindex(heap_address)
+        tempbitlist: typing.List[int] = memoryaccess.get_qword_datas(self.get_blockindex(heap_address).ListsInUseUlong, math.floor(blockindex.ArraySize/(0x8*0x8)))
+        bitmap: int = 0
+        for i, bitnum in enumerate(tempbitlist):
+            bitmap |= bitnum << (i*64)
+        
+        listhint: typing.List[int] = []
+        
+        for i in range(blockindex.ArraySize):
+            listhint.append((True if (bitmap >> i)&1 else False, int(blockindex.ListHints[i])))
+        
+        return listhint
+    
     def is_valid_smalltagindex(self, chunk, encoding) -> int:
         if context.arch == pykd.CPUType.I386:
             checker: int = 0
@@ -1142,11 +1177,11 @@ class NTHeap():
             for ch in (int(chunk.SmallTagIndex) ^ int(encoding.SmallTagIndex)).to_bytes(1, byteorder="little"):
                 checker ^= ch
             return checker
-                        
         
     def print_freelist(self, heap_address: int) -> None:
         heap = self._HEAPInfo(heap_address)
-        freelist = self.get_freelist(heap_address)
+        freelist: typing.List[int] = self.get_freelist(heap_address)
+        listhint: typing.List[typing.Tuple[bool, int]] = self.get_listhint(heap_address)
         
         if freelist == []:
             pykd.dprintln(colour.white("[-] Heap is empty"), dml=True)
@@ -1166,11 +1201,11 @@ class NTHeap():
                     pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
                     pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
                 else:
-                    pykd.dprint(colour.white(f"0x{addr:08x} | Flink: 0x{int(linked_list.Flink):08x} / Blink: 0x{int(linked_list.Blink):08x} |"), dml=True)
+                    pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
                     if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
                         pass
                     else:
-                        pykd.dprint(colour.white(f" Size: 0x{((chunk.Size ^ encoding.Size)<<3):04x} , PrevSize: 0x{((chunk.PreviousSize ^ encoding.PreviousSize) << 3):04x}"), dml=True)
+                        pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{((chunk.Size ^ encoding.Size)<<3):04x}')} , PrevSize: 0x{((chunk.PreviousSize ^ encoding.PreviousSize) << 3):04x}"), dml=True)
                     
                         checker = self.is_valid_smalltagindex(chunk, encoding)
                         if checker != 0:
