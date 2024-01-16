@@ -1213,7 +1213,7 @@ class NTHeap():
                         if real_chunk_size >> 3 >= len(listhint):
                             pass
                         elif listhint[real_chunk_size >> 3] == (True, linked_list_addr):
-                            pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 3}])"), dml=True)
+                            pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 3:#x}])"), dml=True)
                         elif listhint[real_chunk_size >> 3][0] == True and listhint[real_chunk_size >> 3][1] != linked_list_addr:
                             pykd.dprint(colour.red(f" (expect 0x{linked_list_addr:08x} but 0x{listhint[real_chunk_size >> 3][1]:08x}, based on list hint)"), dml=True)
                         
