@@ -1193,7 +1193,11 @@ class NTHeap():
     def get_segmentinfoarray_ptr(self, heap_address: int) -> typing.List[int]:
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
         lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
-        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO*", int)] = []
+        
+        if int(lfh_heap) == 0:
+            return []   
+        
+        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int)] = []
         
         for i in range(0, 128+1):
             segmentinfoarray.append(nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int(lfh_heap.SegmentInfoArrays[i])))
@@ -1337,9 +1341,12 @@ class NTHeap():
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
         lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
         buckets: typing.List[nt.typedVar("_HEAP_BUCKET", int)] = self.get_buckets_ptr(heap_address)
-        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO*", int)] = self.get_segmentinfoarray_ptr(heap_address)
+        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int)] = self.get_segmentinfoarray_ptr(heap_address)
         
         pykd.dprintln(colour.white(f"[+] LFH Heap (0x{heap_address:016x})"), dml=True)
+        if segmentinfoarray == []:
+            pykd.dprintln(colour.white(f"[-] LFH Heap is not enabled"), dml=True)
+            return
         
         for i, lfh_info in enumerate(zip(buckets, segmentinfoarray)):
             bucket, segmentptr = lfh_info
@@ -1355,13 +1362,14 @@ class NTHeap():
             chunk_size: int = self.get_chunk_size(active_subseg.BlockSize)
             
             if aggregate_exchg.Depth == 0:
-                pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+                pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
             else:
                 pykd.dprintln(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
                 pykd.dprint("busybitmap: ")
                 busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar("_RTL_BITMAP", int(user_block.BusyBitmap))
+                bitvalue: int = memoryaccess.get_qword_datas(int(busybitmap.Buffer), 1)[0]
                 for j in range(int(busybitmap.SizeOfBitMap)):
-                    if busybitmap.Buffer[j] == 0:
+                    if (bitvalue >> j) & 1 == 0:
                         pykd.dprint(colour.red(0), dml=True)
                     else:
                         pykd.dprint(colour.green(1), dml=True)
