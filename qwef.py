@@ -1145,23 +1145,67 @@ class NTHeap():
             next_list = nt.typedVar("_LIST_ENTRY", next_list.Flink)
         return freelist
     
-    def get_blockindex(self, heap_address: int) -> nt.typedVar("_HEAP_LIST_LOOKUP", int):
+    def get_blockindex_list(self, heap_address: int)    :
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        return nt.typedVar("_HEAP_LIST_LOOKUP", int(heap.BlocksIndex))  
+        blockindex_list = []
+        current_blockindex = nt.typedVar("_HEAP_LIST_LOOKUP", int(heap.BlocksIndex))
+        while True:
+            blockindex_list.append(current_blockindex)
+            if not pykd.isValid(current_blockindex):
+                break
+            elif current_blockindex == 0:
+                break
+            current_blockindex = nt.typedVar("_HEAP_LIST_LOOKUP", int(current_blockindex.ExtendedLookup))  
+        
+        return blockindex_list
     
-    def get_listhint(self, heap_address: int) -> typing.List[typing.Tuple[bool, int]]:
-        blockindex: nt.typedVar("_HEAP_LIST_LOOKUP") = self.get_blockindex(heap_address)
-        tempbitlist: typing.List[int] = memoryaccess.get_qword_datas(self.get_blockindex(heap_address).ListsInUseUlong, math.floor(blockindex.ArraySize/(0x8*0x8)))
-        bitmap: int = 0
-        for i, bitnum in enumerate(tempbitlist):
-            bitmap |= bitnum << (i*64)
+    def get_listhint(self, heap_address: int) -> typing.List[typing.List[typing.Tuple[bool, int]]]:
+        blockindex_list: typing.List[nt.typedVar("_HEAP_LIST_LOOKUP")] = self.get_blockindex_list(heap_address)
+        listhint_list: typing.List[typing.List[typing.Tuple[bool, int]]] = []
         
-        listhint: typing.List[int] = []
+        for blockindex in blockindex_list:
+            tempbitlist: typing.List[int] = memoryaccess.get_qword_datas(blockindex.ListsInUseUlong, math.floor(blockindex.ArraySize/(0x8*0x8)))
+            bitmap: int = 0
+            for i, bitnum in enumerate(tempbitlist):
+                bitmap |= bitnum << (i*64)
+            
+            listhint: typing.List[int] = []
+            
+            for i in range(blockindex.ArraySize):
+                listhint.append((True if (bitmap >> i)&1 else False, int(blockindex.ListHints[i])))
+            
+            return listhint
+
+    def get_frontendheap(self, heap_address: int) -> nt.typedVar("_LFH_HEAP", int):
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        return nt.typedVar("_LFH_HEAP", int(heap.FrontEndHeap))
+
+    def get_buckets_ptr(self, heap_address: int) -> typing.List[int]:
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
+        buckets: typing.List[nt.typedVar("_HEAP_BUCKET", int)] = []
         
-        for i in range(blockindex.ArraySize):
-            listhint.append((True if (bitmap >> i)&1 else False, int(blockindex.ListHints[i])))
+        for i in range(0, 128+1):
+            buckets.append(nt.typedVar("_HEAP_BUCKET", int(lfh_heap.Buckets[i])))
         
-        return listhint
+        return buckets
+
+    def get_segmentinfoarray_ptr(self, heap_address: int) -> typing.List[int]:
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
+        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO*", int)] = []
+        
+        for i in range(0, 128+1):
+            segmentinfoarray.append(nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int(lfh_heap.SegmentInfoArrays[i])))
+        
+        return segmentinfoarray
+    
+    def get_chunk_size(self, shifted_size: int) -> int:
+        if context.arch == pykd.CPUType.I386:
+            return shifted_size << 3
+        elif context.arch == pykd.CPUType.AMD64:
+            return shifted_size << 4
+        
     
     def is_valid_smalltagindex(self, chunk, encoding) -> int:
         # if context.arch == pykd.CPUType.I386:
@@ -1177,7 +1221,17 @@ class NTHeap():
     def print_freelist(self, heap_address: int) -> None:
         heap = self._HEAPInfo(heap_address)
         freelist: typing.List[int] = self.get_freelist(heap_address)
-        listhint: typing.List[typing.Tuple[bool, int]] = self.get_listhint(heap_address)
+        listhint_list: typing.List[typing.List[typing.Tuple[bool, int]]] = self.get_listhint(heap_address)
+        blockindex_list: typing.List[nt.typedVar("_HEAP_LIST_LOOKUP", int)] = self.get_blockindex_list(heap_address)
+        
+        notlfh_idx: int = -1
+        
+        for i, blockindex in enumerate(blockindex_list):
+            if blockindex.BaseIndex == 0x0:
+                notlfh_idx = i
+                break
+        
+        listhint: typing.List[typing.Tuple[bool, int]] = listhint_list[notlfh_idx]
         
         if freelist == []:
             pykd.dprintln(colour.white("[-] Heap freelist is empty"), dml=True)
@@ -1278,6 +1332,43 @@ class NTHeap():
                     else:
                         pykd.dprintln(f"     ↕️")
             pykd.dprintln(colour.white(f"[+] Heap freelist finished"), dml=True)
+            
+    def print_lfh(self, heap_address: int) -> None:
+        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
+        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
+        buckets: typing.List[nt.typedVar("_HEAP_BUCKET", int)] = self.get_buckets_ptr(heap_address)
+        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO*", int)] = self.get_segmentinfoarray_ptr(heap_address)
+        
+        pykd.dprintln(colour.white(f"[+] LFH Heap (0x{heap_address:016x})"), dml=True)
+        
+        for i, lfh_info in enumerate(zip(buckets, segmentinfoarray)):
+            bucket, segmentptr = lfh_info
+            
+            try:
+                segmentinfo: nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int) = nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", segmentptr)
+                active_subseg: nt.typedVar("_HEAP_SUBSEGMENT", int) = nt.typedVar("_HEAP_SUBSEGMENT", int(segmentinfo.ActiveSubsegment))
+                user_block: nt.typedVar("_HEAP_USERDATA_HEADER", int) = nt.typedVar("_HEAP_USERDATA_HEADER", int(active_subseg.UserBlocks))
+                aggregate_exchg: nt.typedVar("_INTERLOCK_SEQ", int) = nt.typedVar("_INTERLOCK_SEQ", int(active_subseg.AggregateExchg))
+            except pykd.MemoryException:
+                continue
+            
+            chunk_size: int = self.get_chunk_size(active_subseg.BlockSize)
+            
+            if aggregate_exchg.Depth == 0:
+                pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+            else:
+                pykd.dprintln(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+                pykd.dprint("busybitmap: ")
+                busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar("_RTL_BITMAP", int(user_block.BusyBitmap))
+                for j in range(int(busybitmap.SizeOfBitMap)):
+                    if busybitmap.Buffer[j] == 0:
+                        pykd.dprint(colour.red(0), dml=True)
+                    else:
+                        pykd.dprint(colour.green(1), dml=True)
+                pykd.dprintln("")
+                
+        pykd.dprintln(colour.white(f"[+] LFH Heap finished"), dml=True)
+            
     
 class Heap(PEB):
     def __init__(self):
@@ -1371,12 +1462,17 @@ if __name__ == "__main__":
                 if sys.argv[2] == "freelist":
                     for heap_address in heap.get_heaps_address():
                         heap.NtHeap.print_freelist(heap_address)
+                elif sys.argv[2] == "lfh":
+                    for heap_address in heap.get_heaps_address():
+                        heap.NtHeap.print_lfh(heap_address)
                 elif sys.argv[2] == "?":
                     pykd.dprintln("[-] Usage: heap [freelist, ...]")
             
             elif len(sys.argv) == 4:
                 if sys.argv[2] == "freelist":
                     heap.NtHeap.print_freelist(heap.get_heaps_address()[int(sys.argv[3])])
+                elif sys.argv[2] == "lfh":
+                    heap.NtHeap.print_lfh(heap.get_heaps_address()[int(sys.argv[3])])
                 elif sys.argv[2] == "?":
                     pykd.dprintln("[-] Usage: heap [freelist, ...]")
 
