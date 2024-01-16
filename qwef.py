@@ -1174,7 +1174,7 @@ class NTHeap():
                     
                         checker = self.is_valid_smalltagindex(chunk, encoding)
                         if checker != 0:
-                            pykd.dprint(colour.red(f" (encoding error, 0x != 0x{checker:02x})"), dml=True)
+                            pykd.dprint(colour.red(f" (encoding error, 0x0 != 0x{checker:02x})"), dml=True)
                     
                     pykd.dprintln("")
                     
