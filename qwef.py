@@ -1197,16 +1197,26 @@ class NTHeap():
                 chunk = nt.typedVar("_HEAP_ENTRY", addr)
                 encoding = heap.Encoding
                 
+                real_chunk_size = (chunk.Size ^ encoding.Size) << 3
+                real_chunk_prevsize = (chunk.PreviousSize ^ encoding.PreviousSize) << 3
+                
                 if not pykd.isValid(linked_list):
                     pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
                     pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
                 else:
                     pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
                     if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
-                        pass
+                        pykd.dprint(" (head)")
                     else:
-                        pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{((chunk.Size ^ encoding.Size)<<3):04x}')} , PrevSize: 0x{((chunk.PreviousSize ^ encoding.PreviousSize) << 3):04x}"), dml=True)
-                    
+                        pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"), dml=True)
+
+                        if real_chunk_size >> 3 >= len(listhint):
+                            pass
+                        elif listhint[real_chunk_size >> 3] == (True, linked_list_addr):
+                            pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 3}])"), dml=True)
+                        elif listhint[real_chunk_size >> 3][0] == True and listhint[real_chunk_size >> 3][1] != linked_list_addr:
+                            pykd.dprint(colour.red(f" (expect 0x{linked_list_addr:08x} but 0x{listhint[real_chunk_size >> 3][1]:08x}, based on list hint)"), dml=True)
+                        
                         checker = self.is_valid_smalltagindex(chunk, encoding)
                         if checker != 0:
                             pykd.dprint(colour.red(f" (encoding error, 0x0 != 0x{checker:02x})"), dml=True)
