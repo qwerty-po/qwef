@@ -1180,11 +1180,11 @@ class NTHeap():
         listhint: typing.List[typing.Tuple[bool, int]] = self.get_listhint(heap_address)
         
         if freelist == []:
-            pykd.dprintln(colour.white("[-] Heap is empty"), dml=True)
+            pykd.dprintln(colour.white("[-] Heap freelist is empty"), dml=True)
             return
 
         if context.arch == pykd.CPUType.I386:
-            pykd.dprintln(colour.white(f"[+] Heap freelist (0x{heap_address:08x})"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Heap freelist scan (0x{heap_address:08x})"), dml=True)
             for i, addr in enumerate(freelist):
                 linked_list = nt.typedVar("_LIST_ENTRY", addr)
                 linked_list_addr = addr
@@ -1229,7 +1229,7 @@ class NTHeap():
                         pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
                     else:
                         pykd.dprintln(f"     ↕️")
-            pykd.dprintln(colour.white(f"[+] Heap freelist finished"), dml=True)
+            pykd.dprintln(colour.white(f"[+] Heap freelist scan finished"), dml=True)
             
         elif context.arch == pykd.CPUType.AMD64:
             pykd.dprintln(colour.white(f"[+] Heap freelist (0x{heap_address:016x})"), dml=True)
