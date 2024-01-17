@@ -1245,100 +1245,53 @@ class NTHeap():
             pykd.dprintln(colour.white("[-] Heap freelist is empty"), dml=True)
             return
 
-        if context.arch == pykd.CPUType.I386:
-            pykd.dprintln(colour.white(f"[+] Heap freelist scan (0x{heap_address:08x})"), dml=True)
-            for i, addr in enumerate(freelist):
-                linked_list = nt.typedVar("_LIST_ENTRY", addr)
-                linked_list_addr = addr
-                
-                addr -= nt.sizeof("_HEAP_ENTRY")
-                chunk = nt.typedVar("_HEAP_ENTRY", addr)
-                encoding = heap.Encoding
-                
-                real_chunk_size = (chunk.Size ^ encoding.Size) << 3
-                real_chunk_prevsize = (chunk.PreviousSize ^ encoding.PreviousSize) << 3
-                
-                if not pykd.isValid(linked_list):
-                    pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
-                    pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
-                else:
-                    pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
-                    if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
-                        pykd.dprint(" (head)")
-                    else:
-                        pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"), dml=True)
-
-                        if real_chunk_size >> 3 >= len(listhint):
-                            pass
-                        elif listhint[real_chunk_size >> 3] == (True, linked_list_addr):
-                            pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 3:#x}])"), dml=True)
-                        elif listhint[real_chunk_size >> 3][0] == True and listhint[real_chunk_size >> 3][1] != linked_list_addr:
-                            pykd.dprint(colour.red(f" (expect 0x{linked_list_addr:08x} but 0x{listhint[real_chunk_size >> 3][1]:08x}, based on list hint)"), dml=True)
-                        
-                        checker = self.is_valid_smalltagindex(chunk, encoding)
-                        if checker != 0:
-                            pykd.dprint(colour.red(f" (encoding error, 0x0 != 0x{checker:02x})"), dml=True)
-                    
-                    pykd.dprintln("")
-                    
-                if i != len(freelist) - 1:
-                    if linked_list.Flink.Blink != linked_list_addr:
-                        if not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list_addr:
-                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk, next_chunk->Blink->Flink != next_chunk)"), dml=True)
-                        else:
-                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk)"), dml=True)
-                    elif not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list.Flink:
-                        pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
-                    else:
-                        pykd.dprintln(f"     ↕️")
-            pykd.dprintln(colour.white(f"[+] Heap freelist scan finished"), dml=True)
+        pykd.dprintln(colour.white(f"[+] Heap freelist scan (0x{heap_address:08x})"), dml=True)
+        for i, addr in enumerate(freelist):
+            linked_list = nt.typedVar("_LIST_ENTRY", addr)
+            linked_list_addr = addr
             
-        elif context.arch == pykd.CPUType.AMD64:
-            pykd.dprintln(colour.white(f"[+] Heap freelist (0x{heap_address:016x})"), dml=True)
-            for i, addr in enumerate(freelist):
-                linked_list = nt.typedVar("_LIST_ENTRY", addr)
-                linked_list_addr = addr
-                
-                addr -= nt.sizeof("_HEAP_ENTRY")
-                chunk = nt.typedVar("_HEAP_ENTRY", addr)
-                encoding = heap.Encoding
-                
-                real_chunk_size = self.get_chunk_size(chunk.Size ^ encoding.Size)
-                real_chunk_prevsize = self.get_chunk_size(chunk.PreviousSize ^ encoding.PreviousSize)
-                
-                if not pykd.isValid(linked_list):
-                    pykd.dprint(colour.red(f"0x{addr:016x} "), dml=True)
-                    pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
+            addr -= nt.sizeof("_HEAP_ENTRY")
+            chunk = nt.typedVar("_HEAP_ENTRY", addr)
+            encoding = heap.Encoding
+            
+            chunk_idx = (chunk.Size ^ encoding.Size)
+            real_chunk_size = self.get_chunk_size(chunk.Size ^ encoding.Size)
+            real_chunk_prevsize = self.get_chunk_size(chunk.PreviousSize ^ encoding.PreviousSize)
+            
+            if not pykd.isValid(linked_list):
+                pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
+                pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
+            else:
+                pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
+                if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
+                    pykd.dprint(" (head)")
                 else:
-                    pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:016x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):016x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):016x}', linked_list.Blink)} |"), dml=True)
-                    if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
-                        pykd.dprint(" (head)")
-                    else:
-                        pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"), dml=True)
-                        if real_chunk_size >> 4 >= len(listhint):
-                            pykd.dprint(colour.white(f" (out of list hint)"), dml=True)
-                        elif listhint[real_chunk_size >> 4] == (True, linked_list_addr):
-                            pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 4:#x}])"), dml=True)
-                        elif listhint[real_chunk_size >> 4][0] == True and listhint[real_chunk_size >> 4][1] != linked_list_addr:
-                            pykd.dprint(colour.red(f" (expect 0x{linked_list_addr:016x} but 0x{listhint[real_chunk_size >> 4][1]:016x}, based on list hint)"), dml=True)
-                        
-                        checker = self.is_valid_smalltagindex(chunk, encoding)
-                        if checker != 0:
-                            pykd.dprint(colour.red(f" (encoding error, 0x0 != 0x{checker:02x})"), dml=True)
+                    pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"), dml=True)
 
-                    pykd.dprintln("")
-
-                if i != len(freelist) - 1:
-                    if linked_list.Flink.Blink != linked_list_addr:
-                        if not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list_addr:
-                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk, next_chunk->Blink->Flink != next_chunk)"), dml=True)
-                        else:
-                            pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk)"), dml=True)
-                    elif not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list.Flink:
-                        pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
+                    if chunk_idx >= len(listhint):
+                        pykd.dprint(colour.white(f" (out of list hint)"), dml=True)
+                    elif listhint[chunk_idx] == (True, linked_list_addr):
+                        pykd.dprint(colour.white(f" (list hint at [{chunk_idx:#x}])"), dml=True)
+                    elif listhint[chunk_idx][0] == True and listhint[chunk_idx][1] != linked_list_addr:
+                        pykd.dprint(colour.red(f" (expect 0x{linked_list_addr:08x} but 0x{listhint[chunk_idx][1]:08x}, based on list hint)"), dml=True)
+                    
+                    checker = self.is_valid_smalltagindex(chunk, encoding)
+                    if checker != 0:
+                        pykd.dprint(colour.red(f" (encoding error, 0x0 != 0x{checker:02x})"), dml=True)
+                
+                pykd.dprintln("")
+                
+            if i != len(freelist) - 1:
+                if linked_list.Flink.Blink != linked_list_addr:
+                    if not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list_addr:
+                        pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk, next_chunk->Blink->Flink != next_chunk)"), dml=True)
                     else:
-                        pykd.dprintln(f"     ↕️")
-            pykd.dprintln(colour.white(f"[+] Heap freelist finished"), dml=True)
+                        pykd.dprintln(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk)"), dml=True)
+                elif not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list.Flink:
+                    pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
+                else:
+                    pykd.dprintln(f"     ↕️")
+        pykd.dprintln(colour.white(f"[+] Heap freelist scan finished"), dml=True)
             
     def print_lfh(self, heap_address: int) -> None:
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
