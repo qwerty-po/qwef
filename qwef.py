@@ -1429,6 +1429,10 @@ if __name__ == "__main__":
                 elif sys.argv[2] == "lfh":
                     for heap_address in heap.get_heaps_address():
                         heap.NtHeap.print_lfh(heap_address)
+                elif sys.argv[2] == "all":
+                    for heap_address in heap.get_heaps_address():
+                        heap.NtHeap.print_freelist(heap_address)
+                        heap.NtHeap.print_lfh(heap_address)
                 elif sys.argv[2] == "?":
                     pykd.dprintln("[-] Usage: heap [freelist, ...]")
             
@@ -1436,6 +1440,9 @@ if __name__ == "__main__":
                 if sys.argv[2] == "freelist":
                     heap.NtHeap.print_freelist(heap.get_heaps_address()[int(sys.argv[3])])
                 elif sys.argv[2] == "lfh":
+                    heap.NtHeap.print_lfh(heap.get_heaps_address()[int(sys.argv[3])])
+                elif sys.argv[2] == "all":
+                    heap.NtHeap.print_freelist(heap.get_heaps_address()[int(sys.argv[3])])
                     heap.NtHeap.print_lfh(heap.get_heaps_address()[int(sys.argv[3])])
                 elif sys.argv[2] == "?":
                     pykd.dprintln("[-] Usage: heap [freelist, ...]")
