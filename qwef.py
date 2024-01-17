@@ -1223,12 +1223,27 @@ class NTHeap():
             segmentinfoarray.append(nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int(lfh_heap.SegmentInfoArrays[i])))
         
         return segmentinfoarray
+
+    def get_cacheditems(self, segmentinfo_address: int) -> typing.List[int]:
+        segmentinfo: nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int) = nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", segmentinfo_address)
+        cacheditems: typing.List[int] = []
+        
+        for i in range(0, 16):
+            cacheditems.append(int(segmentinfo.CachedItems[i]))
+        
+        return cacheditems
     
-    def get_chunk_size(self, shifted_size: int) -> int:
+    def get_chunk_size(self, chunk_ptr: int, encoding: bool = True, heap_address: int = 0) -> int:
+        heap = self._HEAPInfo(heap_address)
+        chunk = nt.typedVar("_HEAP_ENTRY", chunk_ptr)
+        
+        target = chunk.Size
+        if encoding:
+            target ^= heap.Encoding
         if context.arch == pykd.CPUType.I386:
-            return shifted_size << 3
+            return target << 3
         elif context.arch == pykd.CPUType.AMD64:
-            return shifted_size << 4
+            return target << 4
         
     
     def is_valid_smalltagindex(self, chunk, encoding) -> int:
@@ -1259,7 +1274,7 @@ class NTHeap():
                 
             freelist = self.get_freelist_in_blocksindex(blockindex_list[t])
             
-            if freelist == []:
+            if freelist == []:  
                 pykd.dprintln(colour.white("--------------------- [-] Heap freelist is empty ---------------------\n"), dml=True)
                 return
 
@@ -1273,8 +1288,8 @@ class NTHeap():
                 encoding = heap.Encoding
                 
                 chunk_idx = (chunk.Size ^ encoding.Size)
-                real_chunk_size = self.get_chunk_size(chunk.Size ^ encoding.Size)
-                real_chunk_prevsize = self.get_chunk_size(chunk.PreviousSize ^ encoding.PreviousSize)
+                real_chunk_size = self.get_chunk_size(addr, encoding = True)
+                real_chunk_prevsize = self.get_chunk_size(addr, encoding = True)
                 
                 if not pykd.isValid(linked_list):
                     pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
@@ -1333,7 +1348,7 @@ class NTHeap():
             except pykd.MemoryException:
                 continue
             
-            chunk_size: int = self.get_chunk_size(active_subseg.BlockSize)
+            chunk_size: int = active_subseg.BlockSize << 4 if context.arch == pykd.CPUType.AMD64 else active_subseg.BlockSize << 3
             
             if aggregate_exchg.Depth == 0:
                 pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
@@ -1348,6 +1363,11 @@ class NTHeap():
                     else:
                         pykd.dprint(colour.green(1), dml=True)
                 pykd.dprintln("")
+            
+            cacheditems: typing.List[int] = self.get_cacheditems(segmentptr)
+            for j, cacheditem in enumerate(cacheditems):
+                if cacheditem != 0:
+                    pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} (size: {self.get_chunk_size(cacheditem)})"), dml=True)
             
         pykd.dprintln(colour.white(f"\n-------------------------------------- [+] LFH Heap finished at frontend heap --------------------------------------\n"), dml=True)
             
