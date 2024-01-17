@@ -1233,7 +1233,7 @@ class NTHeap():
         
         return cacheditems
     
-    def get_chunk_size(self, chunk_ptr: int, encoding: bool = True, heap_address: int = 0) -> int:
+    def get_chunk_size(self, chunk_ptr: int, heap_address: int = 0, encoding: bool = True) -> int:
         heap = self._HEAPInfo(heap_address)
         chunk = nt.typedVar("_HEAP_ENTRY", chunk_ptr)
         
@@ -1288,8 +1288,8 @@ class NTHeap():
                 encoding = heap.Encoding
                 
                 chunk_idx = (chunk.Size ^ encoding.Size)
-                real_chunk_size = self.get_chunk_size(addr, encoding = True)
-                real_chunk_prevsize = self.get_chunk_size(addr, encoding = True)
+                real_chunk_size = self.get_chunk_size(addr, heap_address)
+                real_chunk_prevsize = self.get_chunk_size(addr, heap_address)
                 
                 if not pykd.isValid(linked_list):
                     pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
@@ -1367,7 +1367,11 @@ class NTHeap():
             cacheditems: typing.List[int] = self.get_cacheditems(segmentptr)
             for j, cacheditem in enumerate(cacheditems):
                 if cacheditem != 0:
-                    pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} (size: {self.get_chunk_size(cacheditem)})"), dml=True)
+                    try:
+                        pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} (size: {colour.blue(f'{self.get_chunk_size(cacheditem, heap_address)}')})"), dml=True)
+                    except pykd.MemoryException:
+                        pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
+            pykd.dprintln("")
             
         pykd.dprintln(colour.white(f"\n-------------------------------------- [+] LFH Heap finished at frontend heap --------------------------------------\n"), dml=True)
             
