@@ -1164,6 +1164,9 @@ class NTHeap():
         listhint_list: typing.List[typing.List[typing.Tuple[bool, int]]] = []
         
         for blockindex in blockindex_list:
+            if int(blockindex) == 0:
+                listhint_list.append([])
+                continue
             tempbitlist: typing.List[int] = memoryaccess.get_qword_datas(blockindex.ListsInUseUlong, math.floor(blockindex.ArraySize/(0x8*0x8)))
             bitmap: int = 0
             for i, bitnum in enumerate(tempbitlist):
@@ -1173,8 +1176,9 @@ class NTHeap():
             
             for i in range(blockindex.ArraySize):
                 listhint.append((True if (bitmap >> i)&1 else False, int(blockindex.ListHints[i])))
+            listhint_list.append(listhint)
             
-            return listhint
+        return listhint_list
 
     def get_frontendheap(self, heap_address: int) -> nt.typedVar("_LFH_HEAP", int):
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
@@ -1299,8 +1303,8 @@ class NTHeap():
                 chunk = nt.typedVar("_HEAP_ENTRY", addr)
                 encoding = heap.Encoding
                 
-                real_chunk_size = (chunk.Size ^ encoding.Size) << 4
-                real_chunk_prevsize = (chunk.PreviousSize ^ encoding.PreviousSize) << 4
+                real_chunk_size = self.get_chunk_size(chunk.Size ^ encoding.Size)
+                real_chunk_prevsize = self.get_chunk_size(chunk.PreviousSize ^ encoding.PreviousSize)
                 
                 if not pykd.isValid(linked_list):
                     pykd.dprint(colour.red(f"0x{addr:016x} "), dml=True)
@@ -1311,8 +1315,7 @@ class NTHeap():
                         pykd.dprint(" (head)")
                     else:
                         pykd.dprint(colour.white(f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"), dml=True)
-
-                        if real_chunk_size >> 3 >= len(listhint):
+                        if real_chunk_size >> 4 >= len(listhint):
                             pykd.dprint(colour.white(f" (out of list hint)"), dml=True)
                         elif listhint[real_chunk_size >> 4] == (True, linked_list_addr):
                             pykd.dprint(colour.white(f" (list hint at [{real_chunk_size >> 4:#x}])"), dml=True)
