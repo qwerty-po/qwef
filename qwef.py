@@ -1243,7 +1243,7 @@ class NTHeap():
         
         target = chunk.Size
         if encoding:
-            target ^= heap.Encoding
+            target ^= heap.Encoding.Size
         if context.arch == pykd.CPUType.I386:
             return target << 3
         elif context.arch == pykd.CPUType.AMD64:
@@ -1372,9 +1372,9 @@ class NTHeap():
             for j, cacheditem in enumerate(cacheditems):
                 if cacheditem != 0:
                     try:
-                        pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} (size: {colour.blue(f'{self.get_chunk_size(cacheditem, heap_address)}')})"), dml=True)
+                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)}"), dml=True)
                     except pykd.MemoryException:
-                        pykd.dprintln(colour.white(f"cacheditems[{j}]: {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
+                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
             pykd.dprintln("")
             
         pykd.dprintln(colour.white(f"\n-------------------------------------- [+] LFH Heap finished at frontend heap --------------------------------------\n"), dml=True)
