@@ -302,11 +302,12 @@ class MemoryAccess():
             typing.List[int]: _description_
         """
         retlist: typing.List[int] = []
-        for val in pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}").replace("`", "").split("  ")[1].strip().split(" "):
-            try:
-                retlist.append(int(val, 16))
-            except:
-                raise Exception("Invalid data, please check valid ptr first")
+        for vals in pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}").replace("`", "").split("  ")[1].strip().split(" "):
+            for val in vals.split("\n"):
+                try:
+                    retlist.append(int(val, 16))
+                except:
+                    raise Exception("Invalid data, please check valid ptr first")
         return retlist
 
 class PageState(enum.IntEnum):
@@ -1070,9 +1071,11 @@ class SEHInfo():
         self.Curr: int = ptr
         self.Next: typing.Union[int, None] = None 
         self.Handler: typing.Union[int, None] = None
-        
-        self.Next = memoryaccess.deref_ptr(ptr, context.ptrmask)
-        self.Handler = memoryaccess.deref_ptr(ptr + 4, context.ptrmask)
+        try:
+            self.Next = int(nt.typedVar("_EXCEPTION_REGISTRATION_RECORD", ptr).Next) & context.ptrmask
+            self.Handler = int(nt.typedVar("_EXCEPTION_REGISTRATION_RECORD", ptr).Handler) & context.ptrmask  
+        except pykd.MemoryException:
+            pass
 
 class SEH(TEB):
     def __init__(self):
@@ -1080,15 +1083,15 @@ class SEH(TEB):
     
     def getSEHChain(self) -> typing.List[SEHInfo]:
         self.sehchain = []
-        
-        if context.arch != pykd.CPUType.I386:
-            return self.sehchain
+
         
         tebaddress: int = self.getTEBAddress()
+        
         if tebaddress is None:
             return self.sehchain
         
         currseh_ptr: int = memoryaccess.deref_ptr(tebaddress, context.ptrmask)
+
         if currseh_ptr == 0:
             return self.sehchain
         else:
@@ -1098,7 +1101,7 @@ class SEH(TEB):
             self.sehchain.append(SEHInfo(self.sehchain[-1].Next))
             if self.sehchain[-1].Next == context.ptrmask or self.sehchain[-1].Next == None:
                 break
-        
+
         return self.sehchain
     
     def print_sehchain(self) -> None:
@@ -1115,12 +1118,13 @@ class SEH(TEB):
                 pykd.dprintln(f"0x{sehinfo.Curr:08x}: (chain is broken)")
                 return
             else:
+                pykd.dprint(f"{colour.colorize_by_address_priv(f'0x{sehinfo.Curr:08x}', sehinfo.Curr)}: {colour.colorize_by_address_priv(f'0x{sehinfo.Next:08x}', sehinfo.Next)} | {colour.colorize_by_address_priv(f'0x{sehinfo.Handler:08x}', sehinfo.Handler)} ", dml=True)
                 if memoryaccess.get_symbol(sehinfo.Handler) is not None:
-                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <{memoryaccess.get_symbol(sehinfo.Handler)}>")
+                    pykd.dprintln(f"<{memoryaccess.get_symbol(sehinfo.Handler)}>")
                 elif not pykd.isValid(sehinfo.Handler):
-                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x} <invalid address>")
+                    pykd.dprintln(f"<invalid address>")
                 else:
-                    pykd.dprintln(f"0x{sehinfo.Curr:08x}: 0x{sehinfo.Next:08x} | 0x{sehinfo.Handler:08x}")
+                    pykd.dprintln(f"")
                 if sehinfo.Next == context.ptrmask:
                     pykd.dprintln(f"     ↓\n(end of chain)")
 
