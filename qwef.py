@@ -230,12 +230,18 @@ class MemoryAccess():
         self.save_symbol_to_file()
     
     def load_symbol_from_file(self) -> None:
-        with open(self.filename, "r") as fp:
-            self.addr_symbol = json.loads(fp.read())
+        try:
+            with open(self.filename, "r") as fp:
+                self.addr_symbol = json.loads(fp.read())
+        except:
+            pass
     
     def save_symbol_to_file(self) -> None:
-        with open(self.filename, "w") as fp:
-            fp.write(json.dumps(self.addr_symbol))
+        try:
+            with open(self.filename, "w") as fp:
+                fp.write(json.dumps(self.addr_symbol))
+        except:
+            pass
         
     def deref_ptr(self, ptr: int, mask: int) -> typing.Union[int, None]:
         """dereference pointer
