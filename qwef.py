@@ -4,8 +4,10 @@ import sys
 import pykd
 import enum
 import math
+import json
 import typing
 import string
+import tempfile
 
 from dataclasses import dataclass, fields, asdict
 
@@ -219,7 +221,22 @@ class EflagsRegister():
 class MemoryAccess():
     def __init__(self):
         self.addr_symbol: typing.Dict[int, str] = {}
+        
+        self.filename: str = f"{tempfile.gettempdir()}\\{pykd.getProcessSystemID()}.sym"
+        if os.path.exists(self.filename):
+            self.load_symbol_from_file()
     
+    def __del__(self):
+        self.save_symbol_to_file()
+    
+    def load_symbol_from_file(self) -> None:
+        with open(self.filename, "r") as fp:
+            self.addr_symbol = json.loads(fp.read())
+    
+    def save_symbol_to_file(self) -> None:
+        with open(self.filename, "w") as fp:
+            fp.write(json.dumps(self.addr_symbol))
+        
     def deref_ptr(self, ptr: int, mask: int) -> typing.Union[int, None]:
         """dereference pointer
 
@@ -370,7 +387,8 @@ class PageProtect(enum.IntEnum):
     def is_writable(enum_val) -> bool:
         if enum_val & (
                 PageProtect.PAGE_READWRITE \
-                | PageProtect.PAGE_WRITECOPY
+                | PageProtect.PAGE_WRITECOPY \
+                | PageProtect.PAGE_EXECUTE_READWRITE
             ):
             return True
         else:
@@ -380,7 +398,10 @@ class PageProtect(enum.IntEnum):
         if enum_val & (
                 PageProtect.PAGE_READONLY \
                 | PageProtect.PAGE_READWRITE \
-                | PageProtect.PAGE_WRITECOPY
+                | PageProtect.PAGE_WRITECOPY \
+                | PageProtect.PAGE_EXECUTE_READ \
+                | PageProtect.PAGE_EXECUTE_READWRITE \
+                | PageProtect.PAGE_EXECUTE_WRITECOPY
             ):
             return True
         else:
@@ -1083,7 +1104,6 @@ class SEH(TEB):
     
     def getSEHChain(self) -> typing.List[SEHInfo]:
         self.sehchain = []
-
         
         tebaddress: int = self.getTEBAddress()
         
