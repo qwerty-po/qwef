@@ -1353,11 +1353,14 @@ class NTHeap():
                 continue
             
             chunk_size: int = active_subseg.BlockSize << 4 if context.arch == pykd.CPUType.AMD64 else active_subseg.BlockSize << 3
+            heap_entry_start: int = int(user_block) + nt.sizeof("_HEAP_USERDATA_HEADER") + 0x8
             
             if aggregate_exchg.Depth == 0:
                 pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
+                pykd.dprintln(f"heap entry start: {heap_entry_start:#x}")
             else:
                 pykd.dprintln(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+                pykd.dprintln(f"heap entry start: {colour.colorize_by_address_priv(f'{heap_entry_start:#x}', heap_entry_start)}", dml=True)
                 pykd.dprint("busybitmap: ")
                 busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar("_RTL_BITMAP", int(user_block.BusyBitmap))
                 bitvalue: int = memoryaccess.get_qword_datas(int(busybitmap.Buffer), 1)[0]
