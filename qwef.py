@@ -721,18 +721,32 @@ class ContextManager():
         self.print_stack()
     
     def colorize_print_by_priv(self, value) -> None:
-        for section in self.segments_info:
-            if section.base_address <= value <= section.end_address:
-                if section.usage == "Stack":
-                    pykd.dprint(colour.purple(f" 0x{value:016x}"), dml=True)
-                elif PageProtect.is_executable(section.protect):
-                    pykd.dprint(colour.red(f" 0x{value:016x}"), dml=True)
-                elif PageProtect.is_writable(section.protect):
-                    pykd.dprint(colour.green(f" 0x{value:016x}"), dml=True)
-                else:
-                    pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
-                return
-        pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
+        if self.arch == pykd.CPUType.AMD64:
+            for section in self.segments_info:
+                if section.base_address <= value < section.end_address:
+                    if section.usage == "Stack":
+                        pykd.dprint(colour.purple(f" 0x{value:016x}"), dml=True)
+                    elif PageProtect.is_executable(section.protect):
+                        pykd.dprint(colour.red(f" 0x{value:016x}"), dml=True)
+                    elif PageProtect.is_writable(section.protect):
+                        pykd.dprint(colour.green(f" 0x{value:016x}"), dml=True)
+                    else:
+                        pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
+                    return
+            pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
+        elif self.arch == pykd.CPUType.I386:
+            for section in self.segments_info:
+                if section.base_address <= value < section.end_address:
+                    if section.usage == "Stack":
+                        pykd.dprint(colour.purple(f" 0x{value:08x}"), dml=True)
+                    elif PageProtect.is_executable(section.protect):
+                        pykd.dprint(colour.red(f" 0x{value:08x}"), dml=True)
+                    elif PageProtect.is_writable(section.protect):
+                        pykd.dprint(colour.green(f" 0x{value:08x}"), dml=True)
+                    else:
+                        pykd.dprint(colour.white(f" 0x{value:08x}"), dml=True)
+                    return
+            pykd.dprint(colour.white(f" 0x{value:08x}"), dml=True)
     
     def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
         printst: str = ""
