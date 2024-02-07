@@ -1215,7 +1215,7 @@ class SEH(TEB):
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x8, 4), byteorder="little")
                     
                     else:
-                        pykd.println(f" "*12 + f"unknown exception handler type")
+                        pykd.dprintln(f" "*12 + f"unknown exception handler type")
                     
                     pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
 
