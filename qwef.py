@@ -258,6 +258,20 @@ class MemoryAccess():
         except pykd.MemoryException:
             return None
         
+    def get_addr_from_symbol(self, symbol: str) -> typing.Union[int, None]:
+        """get address from symbol
+
+        Args:
+            symbol (str): symbol name
+
+        Returns:
+            typing.Union[int, None]: address or None
+        """
+        try:
+            return int(f"0x{pykd.dbgCommand(f'd {symbol}').split(' ')[0]}", 16)
+        except pykd.MemoryException:
+            return None
+        
     def get_string(self, ptr: int) -> typing.Union[str, None]:
         """load ASCII string (if not return error)
 
@@ -1165,8 +1179,45 @@ class SEH(TEB):
                     pykd.dprintln(f"<invalid address>")
                 else:
                     pykd.dprintln(f"")
+                    
                 if sehinfo.Next == context.ptrmask:
                     pykd.dprintln(f"     ↓\n(end of chain)")
+                else:
+                    try_level = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr + 0xc, 4), byteorder="little")
+                    if try_level == 0xffffffff or try_level == 0xfffffffe:
+                        pykd.println(f" "*12 + f"try_level < 0, not in try block")
+                    scopetable_array = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr + 0x8, 4), byteorder="little")
+                    
+                    if "_except_handler3" in memoryaccess.get_symbol(sehinfo.Handler):
+                        EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level, 4), byteorder="little")
+                        FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x4, 4), byteorder="little")
+                        HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x8, 4), byteorder="little")
+                        
+                    elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
+                        symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
+                        security_cookie = int.from_bytes(memoryaccess.get_bytes(memoryaccess.get_addr_from_symbol(f"{symname}!__security_cookie"), 4), byteorder="little")
+                        scopetable_array ^= security_cookie
+                        
+                        gs_cookie_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array, 4), byteorder="little")
+                        gs_cookie_xor_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x4, 4), byteorder="little")
+                        eh_cookie_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x8, 4), byteorder="little")
+                        eh_cookie_xor_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc, 4), byteorder="little")
+                        
+                        checker = 0
+                        
+                        if gs_cookie_offset != 2:
+                            checker = gs_cookie_offset
+                        else:
+                            checker = eh_cookie_offset
+                        
+                        EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level , 4), byteorder="little")
+                        FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x4, 4), byteorder="little")
+                        HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x8, 4), byteorder="little")
+                    
+                    else:
+                        pykd.println(f" "*12 + f"unknown exception handler type")
+                    
+                    pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
 
 class NTHeap():
     def __init__(self):
