@@ -611,7 +611,10 @@ class Vmmap():
 
     def print_vmmap(self, level: int = 0):
         for section_info in self.dump_section():
-            addr_info: str = f"0x{section_info.base_address:016x} - 0x{section_info.end_address:016x} 0x{section_info.size:011x}"
+            if pykd.CPUType.AMD64 == pykd.getCPUMode():
+                addr_info: str = f"0x{section_info.base_address:016x} - 0x{section_info.end_address:016x} 0x{section_info.size:011x}"
+            elif pykd.CPUType.I386 == pykd.getCPUMode():
+                addr_info: str = f"0x{section_info.base_address:08x} - 0x{section_info.end_address:08x} 0x{section_info.size:08x}"
             state_info: str = ""
             priv_info: str = ""
             guard_info: str = ""
@@ -728,11 +731,20 @@ class ContextManager():
         self.update_vmmap()
         
         pykd.dprintln(colour.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
-        self.print_regs()
+        try:
+            self.print_regs()
+        except:
+            pass
         pykd.dprintln(colour.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
-        self.print_code()
+        try:
+            self.print_code()
+        except:
+            pass
         pykd.dprintln(colour.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
-        self.print_stack()
+        try:
+            self.print_stack()
+        except:
+            pass
     
     def colorize_print_by_priv(self, value) -> None:
         if self.arch == pykd.CPUType.AMD64:
@@ -1177,6 +1189,7 @@ class SEH(TEB):
                     pykd.dprintln(f"<{memoryaccess.get_symbol(sehinfo.Handler)}>")
                 elif not pykd.isValid(sehinfo.Handler):
                     pykd.dprintln(f"<invalid address>")
+                    break
                 else:
                     pykd.dprintln(f"")
                     
@@ -1192,6 +1205,7 @@ class SEH(TEB):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level, 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x8, 4), byteorder="little")
+                        pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
                         
                     elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
                         symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
@@ -1213,11 +1227,10 @@ class SEH(TEB):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level , 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x8, 4), byteorder="little")
+                        pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
                     
                     else:
                         pykd.dprintln(f" "*12 + f"unknown exception handler type")
-                    
-                    pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
 
 class NTHeap():
     def __init__(self):
