@@ -1200,12 +1200,14 @@ class SEH(TEB):
                     if try_level == 0xffffffff or try_level == 0xfffffffe:
                         pykd.println(f" "*12 + f"try_level < 0, not in try block")
                     scopetable_array = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr + 0x8, 4), byteorder="little")
+                    old_esp = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr - 0x8, 4), byteorder="little")
+                    exc_ptr = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr - 0x4, 4), byteorder="little")
                     
                     if "_except_handler3" in memoryaccess.get_symbol(sehinfo.Handler):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level, 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x8, 4), byteorder="little")
-                        pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
+                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_by_address_priv(f'0x{old_esp:08x}', old_esp)}, exc_ptr: {colour.colorize_by_address_priv(f'0x{exc_ptr:08x}', exc_ptr)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
                         
                     elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
                         symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
@@ -1227,7 +1229,7 @@ class SEH(TEB):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level , 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x8, 4), byteorder="little")
-                        pykd.dprintln(f" " * 12 + f"try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
+                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_by_address_priv(f'0x{old_esp:08x}', old_esp)}, exc_ptr: {colour.colorize_by_address_priv(f'0x{exc_ptr:08x}', exc_ptr)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
                     
                     else:
                         pykd.dprintln(f" "*12 + f"unknown exception handler type")
