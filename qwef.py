@@ -1024,7 +1024,6 @@ class SearchPattern():
                             info = section.additional
                         else:
                             info = section.usage
-                        print(type(section.protect))
                         pykd.dprintln(f"[+] In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
                     pykd.dprint(colour.white(f"0x{(addr):016x}"), dml=True)
                     pykd.dprint(f":\t")
