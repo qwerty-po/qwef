@@ -1502,12 +1502,10 @@ class SegmentHeap():
         return nt.typedVar("_SEGMENT_HEAP", heap_address)
     
     def VSContext(self, heap_address: int) -> nt.typedVar("_HEAP_VS_CONTEXT", int):
-        vscontext: int = self._SEGMENT_HEAP(heap_address).VsContext
-        return nt.typedVar("_HEAP_VS_CONTEXT", segment_heap_address)
+        return nt.typedVar("_HEAP_VS_CONTEXT", self._SEGMENT_HEAP(heap_address).VsContext)
 
     def LFHContext(self, heap_address: int) -> nt.typedVar("_HEAP_LFH_CONTEXT", int):
-        lfhcontext: int = self._SEGMENT_HEAP(heap_address).LfhContext
-        return nt.typedVar("_HEAP_LFH_CONTEXT", lfhcontext)
+        return nt.typedVar("_HEAP_LFH_CONTEXT", self._SEGMENT_HEAP(heap_address).LfhContext)
 
     def SegContexts(self, heap_address: int) -> nt.typedVar("_HEAP_SEG_CONTEXT[2]", int):
         return self._SEGMENT_HEAP(heap_address).SegContexts
@@ -1559,20 +1557,16 @@ class SegmentHeap():
     
     def _HEAP_LFH_SUBSEGMENT(self, subsegment_address: int) -> nt.typedVar("_HEAP_LFH_SUBSEGMENT", int):
         return nt.typedVar("_HEAP_LFH_SUBSEGMENT", subsegment_address)
-        
-    # def Bucket_AvaliableSubsegmentCount(self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int)) -> int:
-    #     return int(bucket.State.AvaliableSubsegmentCount)
-
-    # def Bucket_AvaliableSubsegmentList_Head(self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int)) -> nt.typedVar("_LIST_ENTRY", int):
-    #     return bucket.State.AvaliableSubsegmentList.Flink
     
-    def print_bucket(self, heap_address: int, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), banner = True) -> None:
+    def print_bucket(self, heap_address: int, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), size: int, banner = True) -> None:
         if banner:
             pykd.dprintln(colour.white(f"-------------------------------- [+] LFH Bucket ({int(bucket):#x}) --------------------------------\n"), dml=True)
         
-        pykd.dprintln(f"BucketIndex: {self.BucketIndex(bucket)}")
-        curr = self.Bucket_Affinity_AvailableSubsegmentList(bucket).Flink
+        once = True
+        curr = self.Bucket_Affinity_AvailableSubsegmentList(bucket)
         for _ in range(self.Bucket_Affinity_AvailableSubsegmentCount(bucket)):
+            curr = curr.Flink
+            
             subsegment: nt.typedVar("_HEAP_LFH_SUBSEGMENT", int) = self._HEAP_LFH_SUBSEGMENT(curr)
             BlockCount: int = subsegment.BlockCount
             FreeHint: int = subsegment.BlockCount
@@ -1583,12 +1577,23 @@ class SegmentHeap():
             BlockSize: int = BlockOffsets & 0xffff
             FirstBlock: int = int(subsegment) + ((BlockOffsets >> 16) & 0xffff)
             
+            if BlockSize != size:
+                continue
+            
             BlockBitmap: bytes = memoryaccess.get_bytes(subsegment.BlockBitmap, math.floor(BlockCount/4))
+            
+            if once:
+                pykd.dprintln(f"BucketIndex: {self.BucketIndex(bucket)}")
+                once = False
             
             pykd.dprintln(f"    Subsegment: {colour.colorize_by_address_priv(f'0x{int(subsegment):08x}', int(subsegment))}", dml=True)
             pykd.dprintln(f"    FirstBlock: {colour.colorize_by_address_priv(f'0x{FirstBlock:08x}', FirstBlock)}", dml=True)
             pykd.dprintln(f"    BlockSize : {colour.blue(f'{BlockSize:#x}')}", dml=True)
-            pykd.dprintln(f"    BlockCount: {int(BlockCount):#x}, FreeHint: {int(FreeHint):#x}")
+            pykd.dprint(f"    BlockCount: {int(BlockCount):#x}, FreeHint: {int(FreeHint):#x}, ", dml=True)
+            
+            LocationEnum = ["AvailableSegment", "FullSegment", "WillRevertToBackend"]
+            
+            pykd.dprintln(f"Location: {colour.white(f'{LocationEnum[Location]}')}", dml=True)
             pykd.dprint(f"    ")
             
             for i in range(BlockCount//32+1):
@@ -1610,18 +1615,168 @@ class SegmentHeap():
         if banner:
             pykd.dprintln(colour.white(f"\n-------------------------------- [+] LFH Bucket finished --------------------------------\n"), dml=True)
     
-    def print_lfh(self, heap_address: int) -> None:
+    def print_lfh(self, heap_address: int, size: int) -> None:
         pykd.dprintln(colour.white(f"-------------------------------- [+] LFH Bucket ({heap_address:#x}) --------------------------------\n"), dml=True)
+        avaliable_segments_idx = []
         for bucket in self.LFH_Buckets(heap_address):
-            if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(bucket, 0) != 0:
-                self.print_bucket(heap_address, bucket, False)
+            if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(bucket, 0):
+                avaliable_segments_idx.append(self.BucketIndex(bucket))
+        pykd.dprint(colour.white(f"avaliable segments: "), dml=True)
+        
+        for i, idx in enumerate(avaliable_segments_idx):
+            if i % 10 == 0 and i != 0:
+                pykd.dprintln("")
+                pykd.dprint(colour.white(f"                    "), dml=True)
+            pykd.dprint(colour.white(f"{idx * 0x10:#x} "), dml=True)
+        pykd.dprintln("\n")
+        
+        for bucket in self.LFH_Buckets(heap_address):
+            if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(bucket, 0):
+                self.print_bucket(heap_address, bucket, size, False)
         pykd.dprintln(colour.white(f"\n-------------------------------- [+] LFH Bucket finished --------------------------------\n"), dml=True)
     
+    
+    def VS_Callback(self, heap_address: int) -> nt.typedVar("_HEAP_SUBALLOCATOR_CALLBACKS", int):
+        return self.VSContext(heap_address).Callbacks
+    
+    def VS_FreeChunkTree_Root(self, heap_address: int) -> nt.typedVar("_RTL_BALANCED_NODE", int):
+        if self.VSContext(heap_address).FreeChunkTree.Encoded == 0:
+            return nt.typedVar("_RTL_BALANCED_NODE", self.VSContext(heap_address).FreeChunkTree.Root)
+        else:
+            return nt.typedVar("_RTL_BALANCED_NODE", self.VSContext(heap_address).FreeChunkTree.Root ^ int(self.VSContext(heap_address).FreeChunkTree))
+        
+    def VS_inuse_chunk_header(self, chunk_address: int) -> nt.typedVar("_HEAP_VS_CHUNK_HEADER", int):
+        return nt.typedVar("_HEAP_VS_CHUNK_HEADER", chunk_address)
+    
+    def VS_freed_chunk_header(self, chunk_address: int) -> nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", int):
+        return nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk_address)
+    
+    
+    @dataclass
+    class VS_Sizes:
+        MemoryCost: int
+        UnsafeSize: int
+        ActualSize: int
+        UnsafePrevSize: int
+        ActualPrevSize: int
+        Allocated: bool = int
+    
+    def VS_decode_chunk_Sizes(self, chunk_address: int) -> VS_Sizes:
+        Sizes = int(self.VS_inuse_chunk_header(chunk_address).Sizes.HeaderBits)
+        Sizes ^= chunk_address ^ self._RTLP_HP_HEAP_GLOBALS.HeapKey
+        
+        return self.VS_Sizes(
+            MemoryCost= Sizes & 0xffff,
+            UnsafeSize= (Sizes >> 16) & 0xffff,
+            ActualSize= (((Sizes >> 16) & 0xffff) << 4),
+            UnsafePrevSize= (Sizes >> 32) & 0xffff,
+            ActualPrevSize= (((Sizes >> 32) & 0xffff) << 4),
+            Allocated= (Sizes >> 48) & 0xff
+        )
+        
+        
+    def VS_FreeChunkTree_Inorder(self, heap_address: int) -> list:
+        
+        def inorder_traversal(node) -> None:
+            inorder = []
+            
+            if node == 0:
+                return []
+            left = node.Left
+            right = node.Right
+            if left != 0:
+                inorder += inorder_traversal(left)
+            inorder += [node - 0x8]
+            if right != 0:
+                inorder += inorder_traversal(right)
+            
+            return inorder
+        
+        root: nt.typedVar("_RTL_BALANCED_NODE", int) = self.VS_FreeChunkTree_Root(heap_address)
+        return inorder_traversal(root)
+    
     def print_vs(self, heap_address: int) -> None:
-        pass
+        freed_chunks = self.VS_FreeChunkTree_Inorder(heap_address)
+        
+        pykd.dprintln(colour.white(f"-------------------------------- [+] VS Chunk ({heap_address:#x}) --------------------------------\n"), dml=True)
+        for chunk in freed_chunks:
+            chunk = nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk)
+            rbtree_node = nt.typedVar("_RTL_BALANCED_NODE", int(chunk) + 0x8)
+            chunk_Sizes = self.VS_decode_chunk_Sizes(chunk)
+            
+            parent = (rbtree_node.ParentValue - rbtree_node.Red) - 0x8 if (rbtree_node.ParentValue - rbtree_node.Red) != 0 else 0
+            left = rbtree_node.Left - 0x8 if rbtree_node.Left != 0 else 0
+            right = rbtree_node.Right - 0x8 if rbtree_node.Right != 0 else 0
+            
+            if chunk == self.VS_FreeChunkTree_Root(heap_address) - 8:
+                pykd.dprintln(colour.brown("Root"), dml=True)
+            pykd.dprintln(f"addr: {colour.colorize_by_address_priv(f'0x{int(chunk):08x}', int(chunk))}", dml=True)
+            pykd.dprintln(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_by_address_priv(f'0x{chunk - chunk_Sizes.ActualSize:08x}', int(chunk - chunk_Sizes.ActualSize))}", dml=True)
+            pykd.dprintln(f"Parent: {colour.colorize_by_address_priv(f'{parent:#x}', parent)}, Left: {colour.colorize_by_address_priv(f'{left:#x}', left)}, Right: {colour.colorize_by_address_priv(f'{right:#x}', right)}", dml=True)
+            pykd.dprintln("\n")
+    
+    def Seg_SegmentListHead(self, heap_address: int, idx: int) -> nt.typedVar("_LIST_ENTRY", int):
+        return self.SegContexts(heap_address)[idx].SegmentListHead
+    
+    def _HEAP_PAGE_SEGMENT(self, segment_address: int) -> nt.typedVar("_HEAP_PAGE_SEGMENT", int):
+        return nt.typedVar("_HEAP_PAGE_SEGMENT", segment_address)
+
+    def Seg_DescArray(self, segment_address: int) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
+        return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", self._HEAP_PAGE_SEGMENT(segment_address).DescArray)
+    
+    def Seg_FreePageRanges(self, segment_address: int, idx: int) -> nt.typedVar("_RTL_RB_TREE", int):
+        return nt.typedVar("_RTL_RB_TREE", self.SegContexts(segment_address)[idx].FreePageRanges)
+    
+    # error...
+    def Seg_FreePageRanges_Root(self, segment_address: int, idx: int) -> nt.typedVar("_RTL_BALANCED_NODE", int):
+        print(self.Seg_FreePageRanges(segment_address, idx).FreePageRanges)
+        if self.Seg_FreePageRanges(segment_address, idx).Encoded == 0:
+            print(self.Seg_FreePageRanges(segment_address, idx).Root)
+            return nt.typedVar("_RTL_BALANCED_NODE", self.Seg_FreePageRanges(segment_address, idx).Root)
+        else:
+            return nt.typedVar("_RTL_BALANCED_NODE", self.Seg_FreePageRanges(segment_address, idx).Root ^ int(self.Seg_FreePageRanges(segment_address, idx)))
+        
+    def Seg_FreePageRanges_Inorder(self, segment_address: int, idx: int) -> list:
+            
+            def inorder_traversal(node) -> None:
+                inorder = []
+                
+                if node == 0:
+                    return []
+                left = node.Left
+                right = node.Right
+                if left != 0:
+                    inorder += inorder_traversal(left)
+                inorder += [node]
+                if right != 0:
+                    inorder += inorder_traversal(right)
+                
+                return inorder
+            
+            root: nt.typedVar("_RTL_BALANCED_NODE", int) = self.Seg_FreePageRanges_Root(segment_address, idx)
+            return inorder_traversal(root)
 
     def print_segment(self, heap_address: int) -> None:
-        pass
+        pykd.dprintln(colour.white(f"-------------------------------- [+] Segment ({heap_address:#x}) --------------------------------\n"), dml=True)
+        
+        for idx in range(2):
+            if idx == 0:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment --------------------------------\n"), dml=True)
+            else:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment --------------------------------\n"), dml=True)
+            
+            # segment = self.SegContexts(heap_address)[idx]
+            # pykd.dprintln(colour.white(f"Segment: {colour.colorize_by_address_priv(f'0x{int(segment):08x}', int(segment))}"), dml=True)
+            
+            # for freed_chunk in self.Seg_FreePageRanges_Inorder(segment, idx):
+            #     pykd.dprintln(colour.white(f"    addr: {colour.colorize_by_address_priv(f'0x{int(freed_chunk):08x}', int(freed_chunk))}"), dml=True)
+            
+            if idx == 0:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment finished --------------------------------\n"), dml=True)
+            else:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment finished --------------------------------\n"), dml=True)
+            
+        pykd.dprintln(colour.white(f"\n-------------------------------- [+] Segment finished --------------------------------\n"), dml=True)
     
     def print_block(self, heap_address: int) -> None:
         pass
@@ -1652,29 +1807,32 @@ class Heap(PEB):
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
     
-    def print_lfh(self, heap_address: int) -> None:
+    def print_lfh(self, heap_address: int, size: int = -1) -> None:
         if self.is_NTHeap(heap_address):
             self.NtHeap.print_lfh(heap_address)
         elif self.is_SegmentHeap(heap_address):
-            self.SegmentHeap.print_lfh(heap_address)
+            if size != -1:
+                self.SegmentHeap.print_lfh(heap_address, size)
+            else:
+                pykd.dprintln(colour.white(f"[-] Please specify the size of the bucket"), dml=True)
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
     
-    def printf_vs(self, heap_address: int) -> None:
+    def print_vs(self, heap_address: int) -> None:
         if self.is_SegmentHeap(heap_address):
-            self.is_SegmentHeap.print_vs(heap_address)
+            self.SegmentHeap.print_vs(heap_address)
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
         
-    def print_segment(self, heap_address: int) -> None:
+    def print_segment(self, heap_address: int, idx: int = -1) -> None:
         if self.is_SegmentHeap(heap_address):
-            self.is_SegmentHeap.print_segment(heap_address)
+            self.SegmentHeap.print_segment(heap_address)
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
     
     def print_block(self, heap_address: int) -> None:
         if self.is_SegmentHeap(heap_address):
-            self.is_SegmentHeap.print_block(heap_address)
+            self.SegmentHeap.print_block(heap_address)
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
     
@@ -1690,6 +1848,13 @@ class Heap(PEB):
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
 
+class StrToInt():
+    def __init__(self):
+        pass
+    
+    def str2int(self, string: str) -> int:
+        return eval(string)
+    
 ## register commands
 cmd: CmdManager = CmdManager()
 
@@ -1701,6 +1866,8 @@ vmmap: Vmmap = Vmmap()
 search: SearchPattern = SearchPattern()
 seh: SEH = SEH()
 heap: Heap = Heap()
+
+stoi: StrToInt = StrToInt()
 
 if __name__ == "__main__":
     
@@ -1764,30 +1931,28 @@ if __name__ == "__main__":
             if len(sys.argv) == 2:
                 pykd.dprintln("[-] Usage: heap [freelist, ...]")
             
-            elif len(sys.argv) == 3:
-                if sys.argv[2] == "freelist":
-                    for heap_address in heap.get_heaps_address():
-                        heap.print_freelist(heap_address)
-                elif sys.argv[2] == "lfh":
-                    for heap_address in heap.get_heaps_address():
-                        heap.print_lfh(heap_address)
-                elif sys.argv[2] == "all":
-                    for heap_address in heap.get_heaps_address():
-                        heap.print_freelist(heap_address)
-                        heap.print_lfh(heap_address)
-                elif sys.argv[2] == "?":
-                    pykd.dprintln("[-] Usage: heap [freelist, ...]")
-            
             elif len(sys.argv) == 4:
                 if sys.argv[2] == "freelist":
-                    heap.print_freelist(heap.get_heaps_address()[int(sys.argv[3])])
+                    heap.print_freelist(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
                 elif sys.argv[2] == "lfh":
-                    heap.print_lfh(heap.get_heaps_address()[int(sys.argv[3])])
+                    heap.print_lfh(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
+                elif sys.argv[2] == "vs":
+                    heap.print_vs(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
+                elif sys.argv[2] == "segment":
+                    heap.print_segment(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
+                elif sys.argv[2] == "block":
+                    heap.print_block(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
                 elif sys.argv[2] == "all":
-                    heap.print_all(heap.get_heaps_address()[int(sys.argv[3])])
+                    heap.print_all(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
                 elif sys.argv[2] == "?":
-                    pykd.dprintln("[-] Usage: heap [freelist, ...]")
-
+                    pykd.dprintln("[-] Usage: heap [freelist, lfh, all] <heap_index>")
+            
+            elif len(sys.argv) == 5:
+                if sys.argv[2] == "lfh":
+                    heap.print_lfh(heap.get_heaps_address()[stoi.str2int(sys.argv[3])], stoi.str2int(sys.argv[4]))
+                if sys.argv[2] == "segment":
+                    heap.print_segment(heap.get_heaps_address()[stoi.str2int(sys.argv[3])], stoi.str2int(sys.argv[4]))
+            
             else:
                 pykd.dprintln("[-] Usage: heap [freelist, ...]")
             
