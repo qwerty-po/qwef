@@ -1784,8 +1784,8 @@ class SegmentHeap():
     def Seg_PageStart(self, segment_page_address: int, idx: int) -> int:
         return int(segment_page_address + 0x2000) if idx == 0 else int(segment_page_address + 0x10000)
 
-    def Seg_DescArray(self, segment_address: int) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
-        return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", self._HEAP_PAGE_SEGMENT(segment_address).DescArray)
+    def Seg_DescArray(self, segment_address: int, offset: int) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
+        return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", self._HEAP_PAGE_SEGMENT(segment_address).DescArray[offset])
     
     def Seg_DescArrayOffset(self, descarray_address: int) -> int:
         assert(descarray_address % 0x20 == 0)
@@ -1824,8 +1824,40 @@ class SegmentHeap():
         
     def _HEAP_PAGE_RANGE_DESCRIPTOR(self, page_range_descriptor_address: int) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
         return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", page_range_descriptor_address)
-
+    
     def print_segment(self, heap_address: int) -> None:
+        pykd.dprintln(colour.white(f"-------------------------------- [+] Segment ({heap_address:#x}) --------------------------------\n"), dml=True)
+        
+        for idx in range(2):
+            pgoffset = 0x1000 if idx == 0 else 0x10000
+            if idx == 0:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment --------------------------------\n"), dml=True)
+            else:
+                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment --------------------------------\n"), dml=True)
+                
+            segcontext = self.SegContexts(heap_address)[idx]
+            pagesegment = self._HEAP_PAGE_SEGMENT(self.Seg_SegmentListHead(segcontext).Flink)
+            startaddr = self.Seg_PageStart(pagesegment, idx)
+            pykd.dprintln(colour.white(f"Segcontext: {colour.colorize_by_address_priv(f'0x{int(segcontext):08x}', int(segcontext))}"), dml=True)
+            pykd.dprintln(colour.white(f"    PageSegment: {colour.colorize_by_address_priv(f'0x{int(pagesegment):08x}', int(pagesegment))}"), dml=True)
+            pykd.dprintln("")
+            
+            offset: int = 2
+            while offset < 0x100:
+                chunk: int = pagesegment + pgoffset * offset
+                chunk_meta = self._HEAP_PAGE_RANGE_DESCRIPTOR(self.Seg_DescArray(pagesegment, offset))
+                pykd.dprintln(colour.white(f"        Chunk Metadata: {colour.colorize_by_address_priv(f'0x{int(chunk_meta):08x}', int(chunk_meta))}"), dml=True)
+                pykd.dprintln(colour.white(f"            StartAddr: {colour.colorize_by_address_priv(f'0x{chunk:08x}', chunk)}, Size: {colour.blue(hex(chunk_meta.UnitSize * pgoffset))}"), dml=True)
+                pykd.dprintln("")
+                
+                if chunk_meta.UnitSize == 0:
+                    
+                    pykd.dprintln(colour.red(f"            UnitSize is 0 or segment is not initialized, can't dump more"), dml=True)
+                    break
+                else:
+                    offset += chunk_meta.UnitSize
+
+    def print_freed_segment(self, heap_address: int) -> None:
         pykd.dprintln(colour.white(f"-------------------------------- [+] Segment ({heap_address:#x}) --------------------------------\n"), dml=True)
         
         for idx in range(2):
@@ -1952,6 +1984,12 @@ class Heap(PEB):
     def print_segment(self, heap_address: int, idx: int = -1) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_segment(heap_address)
+        else:
+            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
+            
+    def print_freed_segment(self, heap_address: int) -> None:
+        if self.is_SegmentHeap(heap_address):
+            self.SegmentHeap.print_freed_segment(heap_address)
         else:
             pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
     
@@ -2082,8 +2120,11 @@ if __name__ == "__main__":
                 if sys.argv[2] == "lfh":
                     heap.print_lfh(heap.get_heaps_address()[stoi.str2int(sys.argv[3])], stoi.str2int(sys.argv[4]))
                 if sys.argv[2] == "segment":
-                    heap.print_segment(heap.get_heaps_address()[stoi.str2int(sys.argv[3])], stoi.str2int(sys.argv[4]))
-            
+                    if sys.argv[3] == "freed":
+                        heap.print_freed_segment(heap.get_heaps_address()[stoi.str2int(sys.argv[4])])
+                    else:
+                        heap.print_segment(heap.get_heaps_address()[stoi.str2int(sys.argv[3])], stoi.str2int(sys.argv[4]))
+
             else:
                 pykd.dprintln("[-] Usage: heap [freelist, lfh, vs, segment, block, all] <heap_index>")
             
