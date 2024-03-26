@@ -12,6 +12,7 @@ import tempfile
 from dataclasses import dataclass, fields, asdict
 
 nt = pykd.module("ntdll")
+ucrtbase = pykd.module("ucrtbase")
 
 def p64(value: int) -> bytes:
     return value.to_bytes(8, byteorder="little")
@@ -70,23 +71,34 @@ class ColourManager():
 
     def bold_white(self, content): 
         return self.bold_colorize(self.WHITE, content)
-    
-    def colorize_by_address_priv(self, target: str, address: int) -> str:
-        address = int(address) if address >= 0 else context.ptrmask + 1 + address
+
+    def address_color(self, address: int) -> typing.Callable:
+        if address < 0:
+            raise ValueError("Invalid address: address must be positive")
+
         if pykd.isValid(address):
             for section in vmmap.dump_section():
                 if section.base_address <= address < section.end_address:
                     if section.usage == "Stack":
-                        return self.purple(target)
+                        return self.purple
                     elif PageProtect.is_executable(section.protect):
-                        return self.red(target)
+                        return self.red
                     elif PageProtect.is_writable(section.protect):
-                        return self.green(target)
+                        return self.green
                     else:
-                        return self.white(target)
-            return self.white(target)
+                        return self.white
+            return self.white
         else:
-            return self.white(target)
+            return self.white
+    
+    def colorize_hex_by_address(self, address: int, strsz = -1) -> str:
+        target = f"{address:#x}" if strsz == -1 else f"{address:#0{strsz}x}"
+        return self.address_color(address)(target)
+    
+    def colorize_string_by_address(self, target: str, address: int) -> str:
+        return self.address_color(address)(target)
+    
+colour : ColourManager = ColourManager()
 
 # class I386RegisterEnum(enum.IntEnum):
 #     eax = 0; ebx = 1; ecx = 2; edx = 3
@@ -244,44 +256,19 @@ class MemoryAccess():
         except:
             pass
         
-    def deref_ptr(self, ptr: int, mask: int) -> typing.Union[int, None]:
-        """dereference pointer
-
-        Args:
-            ptr (int): pointer address
-            mask (int): masking based on pointer size
-
-        Returns:
-            typing.Union[int, None]: dereferenced pointer or None
-        """
+    def deref_ptr(self, ptr: int) -> typing.Union[int, None]:
         try:
-            return pykd.loadPtrs(ptr, 1)[0] & mask
+            return pykd.loadPtrs(ptr, 1)[0] & ContextManager().ptrmask
         except pykd.MemoryException:
             return None
         
     def get_addr_from_symbol(self, symbol: str) -> typing.Union[int, None]:
-        """get address from symbol
-
-        Args:
-            symbol (str): symbol name
-
-        Returns:
-            typing.Union[int, None]: address or None
-        """
         try:
             return int(f"0x{pykd.dbgCommand(f'x {symbol}').split(' ')[0].replace('`', '')}", 16)
         except pykd.MemoryException:
             return None
         
     def get_string(self, ptr: int) -> typing.Union[str, None]:
-        """load ASCII string (if not return error)
-
-        Args:
-            ptr (int): pointer address
-
-        Returns:
-            typing.Union[str, None]: string or None
-        """
         try:
             return pykd.loadCStr(ptr)
         except pykd.MemoryException:
@@ -290,29 +277,12 @@ class MemoryAccess():
             return None
     
     def get_bytes(self, ptr: int, size: int) -> typing.Union[bytes, None]:
-        """load bytes given size
-
-        Args:
-            ptr (int): pointer address
-            size (int): size of bytes
-
-        Returns:
-            typing.Union[bytes, None]: bytes or None
-        """
         try:
             return pykd.loadBytes(ptr, size)
         except pykd.MemoryException:
             return None
         
     def get_symbol(self, ptr: int) -> typing.Union[str, None]:
-        """get symbol name if exist
-
-        Args:
-            ptr (int): pointer address
-
-        Returns:
-            typing.Union[str, None]: symbol name or None (it would be saved in self.addr_symbol)
-        """
         if ptr in self.addr_symbol:
             return self.addr_symbol[ptr]
         try:
@@ -327,18 +297,6 @@ class MemoryAccess():
             return None
     
     def get_qword_datas(self, ptr: int, size: int = 0x10) -> typing.List[int]:
-        """get data(qword) from ptr (if not return error)
-
-        Args:
-            ptr (int): pointer address
-            size (int, optional): get size. Defaults to 0x10.
-
-        Raises:
-            Exception: _description_
-
-        Returns:
-            typing.List[int]: _description_
-        """
         retlist: typing.List[int] = []
         for vals in pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}").replace("`", "").split("  ")[1].strip().split(" "):
             for val in vals.split("\n"):
@@ -680,6 +638,8 @@ class Vmmap():
                 printst = f"{addr_info} {state_info:11} {state_info}"
             
             if level == 0 and clr != colour.gray:
+                if section_info.usage == "Stack":
+                    clr = colour.purple
                 pykd.dprint(clr(printst), dml=True)
                 pykd.dprint(f" {section_info.usage}")
                 if path_info:
@@ -687,12 +647,35 @@ class Vmmap():
                 else:
                     pykd.dprintln("")
             elif level == 1:
+                if section_info.usage == "Stack":
+                    clr = colour.purple
                 pykd.dprint(clr(printst), dml=True)
                 pykd.dprint(f" {section_info.usage}")
                 if path_info:
                     pykd.dprintln(f" [{path_info}]")
                 else:
                     pykd.dprintln("")
+                
+class PrintManager():
+    
+    def __init__(self):
+        self.banner_size = 160
+
+    def banner_print(self, banner_name: str, color: typing.Callable = colour.white):
+        leftlen = self.banner_size - len(banner_name) - 2
+        llen = leftlen // 2
+        rlen = leftlen - llen
+        pykd.dprintln(color(f"{'-' * llen}{banner_name}{'-' * rlen}"), dml=True)
+    
+    def success_print(self, content: str, color: typing.Callable = colour.white):
+        pykd.dprintln(color(f"[+] {content}"), dml=True)
+    
+    def fail_print(self, content: str, color: typing.Callable = colour.white):
+        pykd.dprintln(color(f"[-] {content}"), dml=True)
+    
+    def trying_print(self, content: str, color: typing.Callable = colour.white):
+        pykd.dprintln(color(f"[*] {content}"), dml=True)
+        
 class ContextManager():
     
     def __init__(self):
@@ -731,53 +714,26 @@ class ContextManager():
         self.update_eflags()
         self.update_vmmap()
         
-        pykd.dprintln(colour.blue("--------------------------------------------------------- registers ---------------------------------------------------------"), dml=True)
+        dprint.banner_print(" registers ", colour.blue)
         try:
             self.print_regs()
         except:
             pass
-        pykd.dprintln(colour.blue("---------------------------------------------------------   codes   ---------------------------------------------------------"), dml=True)
+        dprint.banner_print(" codes ", colour.blue)
         try:
             self.print_code()
         except:
             pass
-        pykd.dprintln(colour.blue("---------------------------------------------------------   stack   ---------------------------------------------------------"), dml=True)
+        dprint.banner_print(" stack ", colour.blue)
         try:
             self.print_stack()
         except:
             pass
-    
-    def colorize_print_by_priv(self, value) -> None:
-        if self.arch == pykd.CPUType.AMD64:
-            for section in self.segments_info:
-                if section.base_address <= value < section.end_address:
-                    if section.usage == "Stack":
-                        pykd.dprint(colour.purple(f" 0x{value:016x}"), dml=True)
-                    elif PageProtect.is_executable(section.protect):
-                        pykd.dprint(colour.red(f" 0x{value:016x}"), dml=True)
-                    elif PageProtect.is_writable(section.protect):
-                        pykd.dprint(colour.green(f" 0x{value:016x}"), dml=True)
-                    else:
-                        pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
-                    return
-            pykd.dprint(colour.white(f" 0x{value:016x}"), dml=True)
-        elif self.arch == pykd.CPUType.I386:
-            for section in self.segments_info:
-                if section.base_address <= value < section.end_address:
-                    if section.usage == "Stack":
-                        pykd.dprint(colour.purple(f" 0x{value:08x}"), dml=True)
-                    elif PageProtect.is_executable(section.protect):
-                        pykd.dprint(colour.red(f" 0x{value:08x}"), dml=True)
-                    elif PageProtect.is_writable(section.protect):
-                        pykd.dprint(colour.green(f" 0x{value:08x}"), dml=True)
-                    else:
-                        pykd.dprint(colour.white(f" 0x{value:08x}"), dml=True)
-                    return
-            pykd.dprint(colour.white(f" 0x{value:08x}"), dml=True)
+        dprint.banner_print("", colour.blue)
     
     def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
         printst: str = ""
-        self.colorize_print_by_priv(value)
+        pykd.dprint(f" {colour.colorize_hex_by_address(value, 16)}", dml=True)
         if memoryaccess.get_symbol(value) is not None:
             pykd.dprint(f" <{colour.white(memoryaccess.get_symbol(value))}>", dml=True)
             
@@ -787,7 +743,7 @@ class ContextManager():
                 return
             else:
                 pykd.dprint(" ->", dml=True)
-                self.deep_print(memoryaccess.deref_ptr(value, self.ptrmask), remain - 1, value)
+                self.deep_print(memoryaccess.deref_ptr(value), remain - 1, value)
                 return
         elif pykd.isValid(xref):
             value: typing.Union[str, None] = memoryaccess.get_string(xref)
@@ -817,7 +773,6 @@ class ContextManager():
         pykd.dprintln("")
     
     def print_eflags(self) -> None:
-        
         for reg, vaule in asdict(self.eflags).items():
             if vaule:
                 pykd.dprint(f"{colour.green(str(EflagsEnum[reg]))} ", dml=True)
@@ -832,7 +787,6 @@ class ContextManager():
         return op_str, asm_str
 
     def print_code_by_address(self, pc: int, tab: str, print_range: int) -> None:
-
         for _ in range(print_range):
             op_str, asm_str = self.disasm(pc)
             sym: str = memoryaccess.get_symbol(pc)
@@ -869,10 +823,14 @@ class ContextManager():
                             num = int(asm_str.split(" ")[1])
                     except:
                         num = 0
-                    goto: int = memoryaccess.deref_ptr(self.regs.rsp + num * 8 if self.arch == pykd.CPUType.AMD64 else self.regs.esp + num * 4, self.ptrmask)
+                    goto: int = memoryaccess.deref_ptr(self.regs.rsp + num * 8 if self.arch == pykd.CPUType.AMD64 else self.regs.esp + num * 4)
                     
                     if goto is not None:
                         self.print_code_by_address(goto, " "*8, 4)
+                if asm_str.startswith("jmp"):
+                    addr: int = int(f"0x{asm_str.split('(')[-1].split(')')[0].strip().replace('`', '')}", 16)
+                    if addr != pykd.disasm().findOffset(offset + 1):
+                        self.print_code_by_address(addr, " "*8, 4)
             else:
                 pykd.dprintln(colour.white(f"   {code_str}"), dml=True)
                 
@@ -992,11 +950,11 @@ class SearchPattern():
                 tmp = tmp >> 8
                 inputsize += 1
             if inputsize > 8:
-                pykd.dprintln(colour.white("[-] Invalid pattern (too long)"), dml=True)
+                dprint.fail_print("Invalid pattern (too long)")
                 self.help()
                 return
 
-            pykd.dprintln(colour.white(f"[+] Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            dprint.trying_print(f"Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}")
             
             for section in vmmap.dump_section():
                 once: bool = True
@@ -1025,8 +983,7 @@ class SearchPattern():
                             info = section.additional
                         else:
                             info = section.usage
-                        pykd.dprintln(f"[+] In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
-                    pykd.dprint(colour.white(f"0x{(addr):016x}"), dml=True)
+                        dprint.success_print(f"In {colour.blue(info)} ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])")
                     pykd.dprint(f":\t")
                 
                     for data in hex_datas:
@@ -1042,10 +999,10 @@ class SearchPattern():
                                 pykd.dprint(".")
                     pykd.dprintln(" |")
                             
-            pykd.dprintln(colour.white(f"[+] Searching pattern finished"), dml=True)
+            dprint.success_print(f"Searching pattern finished")
         
         else:
-            pykd.dprintln(colour.white(f"[+] Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"), dml=True)
+            dprint.trying_print(f"Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}")
             
             for section in vmmap.dump_section():
                 once: bool = True
@@ -1067,7 +1024,7 @@ class SearchPattern():
                             info = section.additional
                         else:
                             info = section.usage
-                        pykd.dprintln(f"[+] In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])", dml=True)
+                        dprint.success_print(f"In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])")
                     pykd.dprint(colour.white(f"0x{(addr):016x}"), dml=True)
                     pykd.dprint(f":\t")
                     
@@ -1086,7 +1043,7 @@ class SearchPattern():
                             pykd.dprint(".")
                     pykd.dprintln(" |")
                     
-            pykd.dprintln(colour.white(f"[+] Searching pattern finished"), dml=True)
+            dprint.success_print("Searching pattern finished")
 
 @dataclass
 class ListEntry():
@@ -1157,7 +1114,7 @@ class SEH(TEB):
         if tebaddress is None:
             return self.sehchain
         
-        currseh_ptr: int = memoryaccess.deref_ptr(tebaddress, context.ptrmask)
+        currseh_ptr: int = memoryaccess.deref_ptr(tebaddress)
 
         if currseh_ptr == 0:
             return self.sehchain
@@ -1175,6 +1132,7 @@ class SEH(TEB):
         return self.sehchain
     
     def print_sehchain(self) -> None:
+        dprint.banner_print(" SEH Chain ")
         self.sehchain = self.getSEHChain()
         self.exceptone: bool = True
         
@@ -1188,7 +1146,7 @@ class SEH(TEB):
                 pykd.dprintln(f"0x{sehinfo.Curr:08x}: (chain is broken)")
                 return
             else:
-                pykd.dprint(f"{colour.colorize_by_address_priv(f'0x{sehinfo.Curr:08x}', sehinfo.Curr)}: {colour.colorize_by_address_priv(f'0x{sehinfo.Next:08x}', sehinfo.Next)} | {colour.colorize_by_address_priv(f'0x{sehinfo.Handler:08x}', sehinfo.Handler)} ", dml=True)
+                pykd.dprint(f"{colour.colorize_hex_by_address(sehinfo.Curr, 8)}: {colour.colorize_hex_by_address(sehinfo.Next, 8)} | {colour.colorize_hex_by_address(sehinfo.Handler, 8)} ", dml=True)
                 if memoryaccess.get_symbol(sehinfo.Handler) is not None:
                     pykd.dprintln(f"<{memoryaccess.get_symbol(sehinfo.Handler)}>")
                 elif not pykd.isValid(sehinfo.Handler):
@@ -1211,8 +1169,8 @@ class SEH(TEB):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level, 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc*try_level + 0x8, 4), byteorder="little")
-                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_by_address_priv(f'0x{old_esp:08x}', old_esp)}, exc_ptr: {colour.colorize_by_address_priv(f'0x{exc_ptr:08x}', exc_ptr)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
-                        
+                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_hex_by_address(old_esp, 8)}, exc_ptr: {colour.colorize_hex_by_address(exc_ptr, 8)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_hex_by_address(FilterFunc, 8)}, HandlerFunc: {colour.colorize_hex_by_address(HandlerFunc, 8)}", dml=True)
+
                     elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
                         symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
                         security_cookie = int.from_bytes(memoryaccess.get_bytes(memoryaccess.get_addr_from_symbol(f"{symname}!__security_cookie"), 4), byteorder="little")
@@ -1233,11 +1191,12 @@ class SEH(TEB):
                         EnclosingLevel = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level , 4), byteorder="little")
                         FilterFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x4, 4), byteorder="little")
                         HandlerFunc = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x10 + 0xc*try_level + 0x8, 4), byteorder="little")
-                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_by_address_priv(f'0x{old_esp:08x}', old_esp)}, exc_ptr: {colour.colorize_by_address_priv(f'0x{exc_ptr:08x}', exc_ptr)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_by_address_priv(f'0x{FilterFunc:08x}', FilterFunc)}, HandlerFunc: {colour.colorize_by_address_priv(f'0x{HandlerFunc:08x}', HandlerFunc)}", dml=True)
+                        pykd.dprintln(f" " * 12 + f"old_esp: {colour.colorize_hex_by_address(old_esp, 8)}, exc_ptr: {colour.colorize_hex_by_address(exc_ptr, 8)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_hex_by_address(FilterFunc, 8)}, HandlerFunc: {colour.colorize_hex_by_address(HandlerFunc, 8)}", dml=True)
+                        
                     
                     else:
                         pykd.dprintln(f" "*12 + f"unknown exception handler type")
-
+        dprint.banner_print("")
 class NTHeap():
     def __init__(self):
         pass
@@ -1391,10 +1350,11 @@ class NTHeap():
             freelist = self.get_freelist_in_blocksindex(blockindex_list[t])
             
             if freelist == []:  
-                pykd.dprintln(colour.white("--------------------- [-] Heap freelist is empty ---------------------\n"), dml=True)
+                dprint.banner_print(" [-] Heap freelist is empty ")
+                pykd.dprintln(colour.white(" [-] Heap freelist is empty \n"), dml=True)
                 return
 
-            pykd.dprintln(colour.white(f"-------------------------------- [+] Heap freelist scan ({heap_address:#x}) at blocksindex {t} --------------------------------\n"), dml=True)
+            dprint.banner_print(f" [+] Heap freelist scan ({heap_address:#x}) at blocksindex {t} ")
             for i, addr in enumerate(freelist):
                 linked_list = nt.typedVar("_LIST_ENTRY", addr)
                 linked_list_addr = addr
@@ -1411,7 +1371,7 @@ class NTHeap():
                     pykd.dprint(colour.red(f"0x{addr:08x} "), dml=True)
                     pykd.dprintln(colour.white(f"| <invalid address> |"), dml=True)
                 else:
-                    pykd.dprint(colour.white(f"{colour.colorize_by_address_priv(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_by_address_priv(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
+                    pykd.dprint(colour.white(f"{colour.colorize_string_by_address(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_string_by_address(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_string_by_address(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"), dml=True)
                     if i == 0 or (i == len(freelist) - 1 and freelist[-1] == freelist[0]):
                         pykd.dprint(" (head)")
                     else:
@@ -1440,7 +1400,7 @@ class NTHeap():
                         pykd.dprintln(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
                     else:
                         pykd.dprintln(f"     ↕️")
-            pykd.dprintln(colour.white(f"\n--------------------------------- [+] Heap freelist scan finished at blocksindex {t} ---------------------------------\n"), dml=True)
+            dprint.banner_print("")
             
     def print_lfh(self, heap_address: int) -> None:
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
@@ -1449,10 +1409,10 @@ class NTHeap():
         segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int)] = self.get_segmentinfoarray_ptr(heap_address)
         
         if segmentinfoarray == []:
-            pykd.dprintln(colour.white(f"-------------------------------- [-] LFH Heap is not enabled --------------------------------\n"), dml=True)
+            dprint.banner_print(" [-] LFH Heap is not enabled ")
             return
         
-        pykd.dprintln(colour.white(f"------------------------------------- [+] LFH Heap ({heap_address:#x}) at frontend heap -------------------------------------\n"), dml=True)
+        dprint.banner_print(f" [+] LFH Heap ({heap_address:#x}) at frontend heap ")
         for i, lfh_info in enumerate(zip(buckets, segmentinfoarray)):
             bucket, segmentptr = lfh_info
             
@@ -1468,11 +1428,11 @@ class NTHeap():
             heap_entry_start: int = int(user_block) + nt.sizeof("_HEAP_USERDATA_HEADER") + 0x8
             
             if aggregate_exchg.Depth == 0:
-                pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
+                pykd.dprintln(colour.white(f"segment {i:#x} is full ({colour.colorize_string_by_address(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
                 pykd.dprintln(f"heap entry start: {heap_entry_start:#x}")
             else:
-                pykd.dprintln(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_by_address_priv(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
-                pykd.dprintln(f"heap entry start: {colour.colorize_by_address_priv(f'{heap_entry_start:#x}', heap_entry_start)}", dml=True)
+                pykd.dprintln(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_string_by_address(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+                pykd.dprintln(f"heap entry start: {colour.colorize_string_by_address(f'{heap_entry_start:#x}', heap_entry_start)}", dml=True)
                 pykd.dprint("busybitmap: ")
                 busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar("_RTL_BITMAP", int(user_block.BusyBitmap))
                 bitvalue: int = memoryaccess.get_qword_datas(int(busybitmap.Buffer), 1)[0]
@@ -1487,12 +1447,12 @@ class NTHeap():
             for j, cacheditem in enumerate(cacheditems):
                 if cacheditem != 0:
                     try:
-                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)}"), dml=True)
+                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_string_by_address(f'{cacheditem:#x}', cacheditem)}"), dml=True)
                     except pykd.MemoryException:
-                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_by_address_priv(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
+                        pykd.dprintln(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_string_by_address(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
             pykd.dprintln("")
             
-        pykd.dprintln(colour.white(f"\n-------------------------------------- [+] LFH Heap finished at frontend heap --------------------------------------\n"), dml=True)
+        dprint.banner_print("")
             
 class SegmentHeap():
     def __init__(self):
@@ -1581,8 +1541,8 @@ class SegmentHeap():
             
             BlockBitmap: bytes = memoryaccess.get_bytes(subsegment.BlockBitmap, BlockCount/4 if BlockCount % 4 == 0 else BlockCount/4 + 1)
             
-            pykd.dprintln(f"    Subsegment: {colour.colorize_by_address_priv(f'{int(subsegment):#x}', int(subsegment))}", dml=True)
-            pykd.dprint(f"    Flink: {colour.colorize_by_address_priv(f'{int(subsegment.ListEntry.Flink):#x}', int(subsegment.ListEntry.Flink))}, Blink: {colour.colorize_by_address_priv(f'{int(subsegment.ListEntry.Blink):#x}', int(subsegment.ListEntry.Blink   ))}", dml=True)
+            pykd.dprintln(f"    Subsegment: {colour.colorize_string_by_address(f'{int(subsegment):#x}', int(subsegment))}", dml=True)
+            pykd.dprint(f"    Flink: {colour.colorize_string_by_address(f'{int(subsegment.ListEntry.Flink):#x}', int(subsegment.ListEntry.Flink))}, Blink: {colour.colorize_string_by_address(f'{int(subsegment.ListEntry.Blink):#x}', int(subsegment.ListEntry.Blink   ))}", dml=True)
             if not pykd.isValid(subsegment.ListEntry.Flink) or subsegment.ListEntry.Flink.Blink != int(subsegment):
                 pykd.dprint(colour.red(f" (Subsegment->Flink->Blink != Subsegment)"), dml=True)
             if not pykd.isValid(subsegment.ListEntry.Blink) or subsegment.ListEntry.Blink.Flink != int(subsegment):
@@ -1623,7 +1583,7 @@ class SegmentHeap():
             return once
             
         if banner:
-            pykd.dprintln(colour.white(f"-------------------------------- [+] LFH Bucket ({int(bucket):#x}) --------------------------------\n"), dml=True)
+            dprint.banner_print(f" [+] LFH Bucket ({int(bucket):#x}) ")
 
         once = True
         already_visited = []
@@ -1656,10 +1616,10 @@ class SegmentHeap():
             curr = curr.Flink
 
         if banner:
-            pykd.dprintln(colour.white(f"\n-------------------------------- [+] LFH Bucket finished --------------------------------\n"), dml=True)
+            dprint.banner_print("")
     
     def print_lfh(self, heap_address: int, size: int) -> None:
-        pykd.dprintln(colour.white(f"-------------------------------- [+] LFH Bucket ({heap_address:#x}) --------------------------------\n"), dml=True)
+        dprint.banner_print(f" [+] LFH Heap ({heap_address:#x}) ")
         avaliable_segments_idx = []
         for bucket in self.LFH_Buckets(heap_address):
             if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(bucket, 0):
@@ -1678,7 +1638,7 @@ class SegmentHeap():
                 self.print_bucket(heap_address, bucket, size, False)
             if pykd.isValid(bucket) and self.Bucket_Affinity_FullSubsegmentList(bucket, 0):
                 avaliable_segments_idx.append(self.BucketIndex(bucket))
-        pykd.dprintln(colour.white(f"\n-------------------------------- [+] LFH Bucket finished --------------------------------\n"), dml=True)
+        dprint.banner_print("")
     
     
     def VS_Callback(self, heap_address: int) -> nt.typedVar("_HEAP_SUBALLOCATOR_CALLBACKS", int):
@@ -1747,7 +1707,7 @@ class SegmentHeap():
     def print_vs(self, heap_address: int) -> None:
         freed_chunks = self.VS_FreeChunkTree_Inorder(heap_address)
         
-        pykd.dprintln(colour.white(f"-------------------------------- [+] VS Chunk ({heap_address:#x}) --------------------------------\n"), dml=True)
+        dprint.banner_print(f" [+] VS Heap ({heap_address:#x}) ")
         for chunk in freed_chunks:
             chunk = nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk)
             rbtree_node = nt.typedVar("_RTL_BALANCED_NODE", int(chunk) + 0x8)
@@ -1763,14 +1723,14 @@ class SegmentHeap():
             
             if chunk == self.VS_FreeChunkTree_Root(heap_address) - 8:
                 pykd.dprintln(colour.brown("Root"), dml=True)
-            pykd.dprintln(f"addr: {colour.colorize_by_address_priv(f'0x{int(chunk):08x}', int(chunk))}", dml=True)
-            pykd.dprintln(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_by_address_priv(f'0x{chunk - chunk_Sizes.ActualSize:08x}', int(chunk - chunk_Sizes.ActualSize))}", dml=True)
-            pykd.dprint(f"Parent: {colour.colorize_by_address_priv(f'{parent:#x}', parent)}, Left: {colour.colorize_by_address_priv(f'{left:#x}', left)}, Right: {colour.colorize_by_address_priv(f'{right:#x}', right)}", dml=True)
+            pykd.dprintln(f"addr: {colour.colorize_string_by_address(f'0x{int(chunk):08x}', int(chunk))}", dml=True)
+            pykd.dprintln(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_string_by_address(f'0x{chunk - chunk_Sizes.ActualSize:08x}', int(chunk - chunk_Sizes.ActualSize))}", dml=True)
+            pykd.dprint(f"Parent: {colour.colorize_string_by_address(f'{parent:#x}', parent)}, Left: {colour.colorize_string_by_address(f'{left:#x}', left)}, Right: {colour.colorize_string_by_address(f'{right:#x}', right)}", dml=True)
             
             pykd.dprintln("")
 
             pykd.dprintln("\n")
-        pykd.dprintln(colour.white(f"-------------------------------- [+] VS Chunk finished --------------------------------\n"), dml=True)
+        dprint.banner_print("")
             
     def _HEAP_SEG_CONTEXT(self, segment_address: int) -> nt.typedVar("_HEAP_SEG_CONTEXT", int):
         return nt.typedVar("_HEAP_SEG_CONTEXT", segment_address)
@@ -1826,28 +1786,28 @@ class SegmentHeap():
         return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", page_range_descriptor_address)
     
     def print_segment(self, heap_address: int) -> None:
-        pykd.dprintln(colour.white(f"-------------------------------- [+] Segment ({heap_address:#x}) --------------------------------\n"), dml=True)
+        dprint.banner_print(f" [+] Segment ({heap_address:#x}) ")
         
         for idx in range(2):
             pgoffset = 0x1000 if idx == 0 else 0x10000
             if idx == 0:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment --------------------------------\n"), dml=True)
+                dprint.banner_print(" [+] Small Segment ")
             else:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment --------------------------------\n"), dml=True)
+                dprint.banner_print(" [+] Large Segment ")
                 
             segcontext = self.SegContexts(heap_address)[idx]
             pagesegment = self._HEAP_PAGE_SEGMENT(self.Seg_SegmentListHead(segcontext).Flink)
             startaddr = self.Seg_PageStart(pagesegment, idx)
-            pykd.dprintln(colour.white(f"Segcontext: {colour.colorize_by_address_priv(f'0x{int(segcontext):08x}', int(segcontext))}"), dml=True)
-            pykd.dprintln(colour.white(f"    PageSegment: {colour.colorize_by_address_priv(f'0x{int(pagesegment):08x}', int(pagesegment))}"), dml=True)
+            pykd.dprintln(colour.white(f"Segcontext: {colour.colorize_string_by_address(f'0x{int(segcontext):08x}', int(segcontext))}"), dml=True)
+            pykd.dprintln(colour.white(f"    PageSegment: {colour.colorize_string_by_address(f'0x{int(pagesegment):08x}', int(pagesegment))}"), dml=True)
             pykd.dprintln("")
             
             offset: int = 2
             while offset < 0x100:
                 chunk: int = pagesegment + pgoffset * offset
                 chunk_meta = self._HEAP_PAGE_RANGE_DESCRIPTOR(self.Seg_DescArray(pagesegment, offset))
-                pykd.dprintln(colour.white(f"        Chunk Metadata: {colour.colorize_by_address_priv(f'0x{int(chunk_meta):08x}', int(chunk_meta))}"), dml=True)
-                pykd.dprintln(colour.white(f"            StartAddr: {colour.colorize_by_address_priv(f'0x{chunk:08x}', chunk)}, Size: {colour.blue(hex(chunk_meta.UnitSize * pgoffset))}"), dml=True)
+                pykd.dprintln(colour.white(f"        Chunk Metadata: {colour.colorize_string_by_address(f'0x{int(chunk_meta):08x}', int(chunk_meta))}"), dml=True)
+                pykd.dprintln(colour.white(f"            StartAddr: {colour.colorize_string_by_address(f'0x{chunk:08x}', chunk)}, Size: {colour.blue(hex(chunk_meta.UnitSize * pgoffset))}"), dml=True)
                 pykd.dprintln("")
                 
                 if chunk_meta.UnitSize == 0:
@@ -1858,35 +1818,32 @@ class SegmentHeap():
                     offset += chunk_meta.UnitSize
 
     def print_freed_segment(self, heap_address: int) -> None:
-        pykd.dprintln(colour.white(f"-------------------------------- [+] Segment ({heap_address:#x}) --------------------------------\n"), dml=True)
+        dprint.banner_print(f" [+] Segment ({heap_address:#x}) ")
         
         for idx in range(2):
             pgoffset = 0x1000 if idx == 0 else 0x10000
             if idx == 0:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment --------------------------------\n"), dml=True)
+                dprint.banner_print(" [+] Small Segment ")
             else:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment --------------------------------\n"), dml=True)
+                dprint.banner_print(" [+] Large Segment ")
             
             segcontext = self.SegContexts(heap_address)[idx]
             pagesegment = self._HEAP_PAGE_SEGMENT(self.Seg_SegmentListHead(segcontext).Flink)
             startaddr = self.Seg_PageStart(pagesegment, idx)
             FreePageRanges = self.Seg_FreePageRanges_Inorder(segcontext)
             if FreePageRanges != []:
-                pykd.dprintln(colour.white(f"Segcontext: {colour.colorize_by_address_priv(f'0x{int(segcontext):08x}', int(segcontext))}"), dml=True)
+                pykd.dprintln(colour.white(f"Segcontext: {colour.colorize_string_by_address(f'0x{int(segcontext):08x}', int(segcontext))}"), dml=True)
             
             for freed_chunk_meta in FreePageRanges:
                 offset: int = self.Seg_DescArrayOffset(int(freed_chunk_meta))
                 chunk: int = startaddr + pgoffset * offset
                 chunk_meta = self._HEAP_PAGE_RANGE_DESCRIPTOR(freed_chunk_meta)
-                pykd.dprintln(colour.white(f"    Chunk Metadata: {colour.colorize_by_address_priv(f'0x{int(chunk_meta):08x}', int(chunk_meta))}"), dml=True)
-                pykd.dprintln(colour.white(f"        StartAddr: {colour.colorize_by_address_priv(f'0x{chunk:08x}', chunk)}, Size: {colour.blue(hex(chunk_meta.UnitSize * pgoffset))}"), dml=True)
+                pykd.dprintln(colour.white(f"    Chunk Metadata: {colour.colorize_string_by_address(f'0x{int(chunk_meta):08x}', int(chunk_meta))}"), dml=True)
+                pykd.dprintln(colour.white(f"        StartAddr: {colour.colorize_string_by_address(f'0x{chunk:08x}', chunk)}, Size: {colour.blue(hex(chunk_meta.UnitSize * pgoffset))}"), dml=True)
             
-            if idx == 0:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Small Segment finished --------------------------------\n"), dml=True)
-            else:
-                pykd.dprintln(colour.white(f"-------------------------------- [+] Large Segment finished --------------------------------\n"), dml=True)
+            dprint.banner_print("")
             
-        pykd.dprintln(colour.white(f"\n-------------------------------- [+] Segment finished --------------------------------\n"), dml=True)
+        dprint.banner_print("")
     
     def print_block(self, heap_address: int) -> None:
         pass
@@ -1954,14 +1911,14 @@ class Heap(PEB):
         self.heaps = []
         
         for i in range(peb.NumberOfHeaps):
-            self.heaps.append(memoryaccess.deref_ptr(peb.ProcessHeaps + i*(4 if context.arch == pykd.CPUType.I386 else 8), context.ptrmask))
+            self.heaps.append(memoryaccess.deref_ptr(peb.ProcessHeaps + i*(4 if context.arch == pykd.CPUType.I386 else 8)))
         return self.heaps
 
     def print_freelist(self, heap_address: int) -> None:
         if self.is_NTHeap(heap_address):
             self.NtHeap.print_freelist(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
+            dprint.fail_print("Heap type is not supported")
     
     def print_lfh(self, heap_address: int, size: int = -1) -> None:
         if self.is_NTHeap(heap_address):
@@ -1973,32 +1930,32 @@ class Heap(PEB):
                 self.SegmentHeap.print_lfh(heap_address, -1)
                 # pykd.dprintln(colour.white(f"[-] Please specify the size of the bucket"), dml=True)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
+            dprint.fail_print("Heap type is not supported")
     
     def print_vs(self, heap_address: int) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_vs(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
+            dprint.fail_print("Heap type is not supported")
         
     def print_segment(self, heap_address: int, idx: int = -1) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_segment(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
-            
+            dprint.fail_print("Heap type is not supported")
+                        
     def print_freed_segment(self, heap_address: int) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_freed_segment(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
-    
+            dprint.fail_print("Heap type is not supported")
+                
     def print_block(self, heap_address: int) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_block(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
-    
+            dprint.fail_print("Heap type is not supported")
+                
     def print_all(self, heap_address: int) -> None:
         if self.is_NTHeap(heap_address):
             self.NtHeap.print_freelist(heap_address)
@@ -2009,8 +1966,32 @@ class Heap(PEB):
             self.SegmentHeap.print_segment(heap_address)
             self.SegmentHeap.print_block(heap_address)
         else:
-            pykd.dprintln(colour.white(f"[-] Heap type is not supported"), dml=True)
+            dprint.fail_print("Heap type is not supported")
+            
+class Utils():
+    def __init__(self):
+        pass
 
+    def exittable_viewer(self) -> None:
+        dprint.banner_print(" [+] _acrt_atexit_table ")
+        exit_table_addr = memoryaccess.get_addr_from_symbol('ucrtbase!_acrt_atexit_table')
+        security_cookie = memoryaccess.deref_ptr(memoryaccess.get_addr_from_symbol('ucrtbase!__security_cookie'))
+        first = ror(memoryaccess.deref_ptr(exit_table_addr) ^ security_cookie, security_cookie&0x3f, 64)
+        last = ror(memoryaccess.deref_ptr(exit_table_addr + (4 if context.arch == pykd.CPUType.I386 else 8)) ^ security_cookie, security_cookie&0x3f, 64)
+        
+        pykd.dprintln("_acrt_atexit_table")
+        pykd.dprintln(f"Range: [{colour.colorize_string_by_address(hex(first), first)}, {colour.colorize_string_by_address(hex(last), last)})", dml=True)
+        for i, value_ptr in enumerate(range(first, last, 8)):
+            value = memoryaccess.deref_ptr(value_ptr)
+            if value != security_cookie:
+                value = ror(value ^ security_cookie, security_cookie&0x3f, 64)
+            else:
+                value = 0
+            if value != 0:
+                pykd.dprintln(f"{i:02}: {colour.colorize_string_by_address(f'{value_ptr:#x}', value_ptr)} -> {colour.colorize_string_by_address(f'{value:#x}', value)}", dml=True)
+        
+        dprint.banner_print("")
+        
 class StrToInt():
     def __init__(self):
         pass
@@ -2024,15 +2005,26 @@ class StrToInt():
 cmd: CmdManager = CmdManager()
 
 memoryaccess: MemoryAccess = MemoryAccess()
-colour: ColourManager = ColourManager()
 context: ContextManager = ContextManager() 
+dprint: PrintManager = PrintManager()
 
 vmmap: Vmmap = Vmmap()
 search: SearchPattern = SearchPattern()
 seh: SEH = SEH()
 heap: Heap = Heap()
+utils: Utils = Utils()
 
 stoi: StrToInt = StrToInt()
+
+# Rotate left: 0b1001 --> 0b0011
+rol = lambda val, r_bits, max_bits: \
+    (val << r_bits%max_bits) & (2**max_bits-1) | \
+    ((val & (2**max_bits-1)) >> (max_bits-(r_bits%max_bits)))
+ 
+# Rotate right: 0b1001 --> 0b1100
+ror = lambda val, r_bits, max_bits: \
+    ((val & (2**max_bits-1)) >> r_bits%max_bits) | \
+    (val << (max_bits-(r_bits%max_bits)) & (2**max_bits-1))
 
 if __name__ == "__main__":
     
@@ -2046,6 +2038,7 @@ if __name__ == "__main__":
     cmd.alias("view", "view")
     cmd.alias("seh", "seh")
     cmd.alias("heap", "heap")
+    cmd.alias("exittable", "exittable")
     
     if len(sys.argv) > 1:
         command=sys.argv[1]
@@ -2075,6 +2068,9 @@ if __name__ == "__main__":
                     context.si(int(sys.argv[2], 16))
                 else:
                     context.si(int(sys.argv[2]))
+        elif command == 'exittable':
+            if len(sys.argv) == 2:
+                utils.exittable_viewer()
         elif command == 'view':
             context.print_context()
         elif command == "find":
