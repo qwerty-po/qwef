@@ -1723,9 +1723,9 @@ class SegmentHeap():
             
             if chunk == self.VS_FreeChunkTree_Root(heap_address) - 8:
                 pykd.dprintln(colour.brown("Root"), dml=True)
-            pykd.dprintln(f"addr: {colour.colorize_string_by_address(f'0x{int(chunk):08x}', int(chunk))}", dml=True)
-            pykd.dprintln(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_string_by_address(f'0x{chunk - chunk_Sizes.ActualSize:08x}', int(chunk - chunk_Sizes.ActualSize))}", dml=True)
-            pykd.dprint(f"Parent: {colour.colorize_string_by_address(f'{parent:#x}', parent)}, Left: {colour.colorize_string_by_address(f'{left:#x}', left)}, Right: {colour.colorize_string_by_address(f'{right:#x}', right)}", dml=True)
+            pykd.dprintln(f"addr: {colour.colorize_hex_by_address(int(chunk))}", dml=True)
+            pykd.dprintln(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_hex_by_address(int(chunk - chunk_Sizes.ActualSize))}", dml=True)
+            pykd.dprint(f"Parent: {colour.colorize_hex_by_address(parent)}, Left: {colour.colorize_hex_by_address(left)}, Right: {colour.colorize_hex_by_address(right)}", dml=True)
             
             pykd.dprintln("")
 
@@ -1980,7 +1980,7 @@ class Utils():
         last = ror(memoryaccess.deref_ptr(exit_table_addr + (4 if context.arch == pykd.CPUType.I386 else 8)) ^ security_cookie, security_cookie&0x3f, 64)
         
         pykd.dprintln("_acrt_atexit_table")
-        pykd.dprintln(f"Range: [{colour.colorize_string_by_address(hex(first), first)}, {colour.colorize_string_by_address(hex(last), last)})", dml=True)
+        pykd.dprintln(f"Range: [{colour.colorize_hex_by_address(first)}, {colour.colorize_hex_by_address(last)})", dml=True)
         for i, value_ptr in enumerate(range(first, last, 8)):
             value = memoryaccess.deref_ptr(value_ptr)
             if value != security_cookie:
@@ -1988,7 +1988,7 @@ class Utils():
             else:
                 value = 0
             if value != 0:
-                pykd.dprintln(f"{i:02}: {colour.colorize_string_by_address(f'{value_ptr:#x}', value_ptr)} -> {colour.colorize_string_by_address(f'{value:#x}', value)}", dml=True)
+                pykd.dprintln(f"{i:02}: {colour.colorize_hex_by_address(value_ptr)} -> {colour.colorize_hex_by_address(value)}", dml=True)
         
         dprint.banner_print("")
         
