@@ -535,7 +535,8 @@ class SectionInfo:
 class Vmmap():
     
     def __init__(self):
-        pass
+        self.dump_section_info = None 
+        self.dump_section(True)
 
     def section_info(self, address: int) -> SectionInfo:
         section_info: SectionInfo = SectionInfo()
@@ -577,7 +578,11 @@ class Vmmap():
             
         return section_info
     
-    def dump_section(self) -> typing.List[SectionInfo]:
+    def dump_section(self, reload=False) -> typing.List[SectionInfo]:
+        
+        if self.dump_section_info is not None and reload is False:
+            return self.dump_section_info
+        
         dumped_info: typing.List[SectionInfo] = []
         base: int = 0
         
@@ -589,7 +594,8 @@ class Vmmap():
             else:
                 dumped_info.append(target_info)
                 base += dumped_info[-1].size
-            
+        self.dump_section_info = dumped_info
+        
         return dumped_info
 
     def print_vmmap(self, level: int = 0):
@@ -756,7 +762,6 @@ class ContextManager():
         self.update_vmmap()
         self.update_regs()
         self.update_eflags()
-        self.update_vmmap()
         
         dprint.banner_print(" registers ", colour.blue)
         try:
