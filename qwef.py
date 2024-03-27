@@ -275,6 +275,30 @@ class MemoryAccess():
             return None
         except UnicodeDecodeError:
             return None
+        
+    def get_int(self, ptr: int) -> typing.Union[int, None]:
+        try:
+            return pykd.ptrSignDWord(ptr)
+        except pykd.MemoryException:
+            return None
+    
+    def get_uint(self, ptr: int) -> typing.Union[int, None]:
+        try:
+            return pykd.ptrDWord(ptr)
+        except pykd.MemoryException:
+            return None
+        
+    def get_long(self, ptr: int) -> typing.Union[int, None]:
+        try:
+            return pykd.ptrSignQWord(ptr)
+        except pykd.MemoryException:
+            return None
+    
+    def get_ulong(self, ptr: int) -> typing.Union[int, None]:
+        try:
+            return pykd.ptrQWord(ptr)
+        except pykd.MemoryException:
+            return None
     
     def get_bytes(self, ptr: int, size: int) -> typing.Union[bytes, None]:
         try:
@@ -1146,16 +1170,16 @@ class SEH(TEB):
     def except_handler4(self, sehinfo: SEHInfo) -> typing.Tuple[int, int, int]:
         symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
         security_cookie = int.from_bytes(memoryaccess.get_bytes(memoryaccess.get_addr_from_symbol(f"{symname}!__security_cookie"), 4), byteorder="little")
-        scopetable_array = int.from_bytes(memoryaccess.get_bytes(sehinfo.Curr + 0x8, 4), byteorder="little") ^ security_cookie
+        scopetable_array = self.get_scopetable(sehinfo) ^ security_cookie
         
-        gs_cookie_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array, 4), byteorder="little")
-        gs_cookie_xor_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x4, 4), byteorder="little")
-        eh_cookie_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0x8, 4), byteorder="little")
-        eh_cookie_xor_offset = int.from_bytes(memoryaccess.get_bytes(scopetable_array + 0xc, 4), byteorder="little")
+        gs_cookie_offset = memoryaccess.get_int(scopetable_array)
+        gs_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0x4)
+        eh_cookie_offset = memoryaccess.get_int(scopetable_array + 0x8)
+        eh_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0xc)
         
         checker = 0
         
-        if gs_cookie_offset != 2:
+        if gs_cookie_offset != -2:
             checker = gs_cookie_offset
         else:
             checker = eh_cookie_offset
