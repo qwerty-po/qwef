@@ -91,7 +91,12 @@ class ColourManager():
         else:
             return self.white
     
-    def colorize_hex_by_address(self, address: int, strsz = -1) -> str:
+    def colorize_hex_by_address(self, address: any, strsz = -1) -> str:
+        if type(address) is not int:
+            try:
+                address = int(address)
+            except:
+                raise ValueError("Type can't change to integer")
         target = f"{address:#x}" if strsz == -1 else f"0x{address:0{strsz}x}"
         return self.address_color(address)(target)
     
@@ -1169,6 +1174,67 @@ class ListEntry():
             result.append(curr)
             curr = curr.Flink
         return (success, errorstr), result
+    
+class RBTree():
+    def __init__(self):
+        pass
+
+    def return_check_rbtree(self, error: typing.List[str]):
+        return (True if error == [] else False, error)
+
+    def check_rbtree(self, rbtree: nt.typedVar("_RTL_RB_TREE", int)) -> typing.Tuple[bool, str]:
+        error = []
+        
+        if not pykd.isValid(rbtree):
+            return (False, f"rbtree({colour.colorize_hex_by_address(rbtree)}) is Invalid address")
+        
+        if not pykd.isValid(rbtree.Root):
+            error.append(f"rbtree.Root({colour.colorize_hex_by_address(rbtree.Root)}) is Invalid address")
+        if error != []:
+            return self.return_check_rbtree(error)
+    
+    def check_rbtree_node(self, node: nt.typedVar("_RTL_BALANCED_NODE", int), isroot: bool = False) -> typing.Tuple[bool, str]:
+        error = []
+        
+        if not pykd.isValid(node):
+            return (False, f"rbtree node({colour.colorize_hex_by_address(node)}) is Invalid address")
+        
+        if not pykd.isValid(node.ParentValue) and isroot is False:
+            error.append(f"rbtree node.ParentValue({int(node.ParentValue)}) is Invalid address")
+        if not pykd.isValid(node.Left) and node.Left != 0:
+            error.append(f"rbtree node.Left({int(node.Left)}) is Invalid address")
+        if not pykd.isValid(node.Right) and node.Right != 0:
+            error.append(f"rbtree node.Right({int(node.Right)}) is Invalid address")
+        if error != []:
+            return self.return_check_rbtree(error)
+    
+        if node.Left != 0 and node.Left.ParentValue&~(0b11) != node:
+            error.append(f"node.Left.ParentValue({int(node.Left.ParentValue&~(0b11)):#x}) != node({int(node):#x})")
+        if node.Right != 0 and node.Right.ParentValue&~(0b11) != node:
+            error.append(f"node.Right.ParentValue({int(node.Right.ParentValue&~(0b11)):#x}) != node({int(node):#x})")
+        return self.return_check_rbtree(error)
+    
+    def rbtree_inorder_traversal(self, node: nt.typedVar("_RTL_BALANCED_NODE", int)) -> typing.List[any]:
+        inorder = []
+        
+        if node == 0:
+            return []
+        if not pykd.isValid(node):
+            return []
+    
+        left = node.Left
+        right = node.Right
+        if left != 0 and left not in inorder:
+            inorder += self.rbtree_inorder_traversal(left)
+        if node not in inorder:
+            inorder.append(node)
+        if right != 0 and right not in inorder:
+            inorder += self.rbtree_inorder_traversal(right)
+        
+        return inorder
+        
+    def traversal_rbtree(self, root: nt.typedVar("_RTL_BALANCED_NODE", int)) -> typing.List[any]:
+        return self.rbtree_inorder_traversal(root)
 
 class TEB():
     def __init__(self):
@@ -1576,7 +1642,7 @@ class NTHeap(ListEntry):
             
         dprint.banner_print("")
             
-class SegmentHeap(ListEntry):
+class SegmentHeap(ListEntry, RBTree):
     def __init__(self):
         self._RTLP_HP_HEAP_GLOBALS = nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
         self.buckets_cnt = 130
@@ -1805,55 +1871,33 @@ class SegmentHeap(ListEntry):
         
         
     def VS_FreeChunkTree_Inorder(self, heap_address: int) -> list:
-        visited = []
-        def inorder_traversal(node) -> None:
-            inorder = []
-            
-            if node == 0:
-                return []
-            elif not pykd.isValid(node):
-                return []
-            left = node.Left
-            right = node.Right
-            if left != 0 and left not in visited:
-                visited.append(left)
-                inorder += inorder_traversal(left)
-            inorder += [node - 0x8]
-            if right != 0 and right not in visited:
-                visited.append(right)
-                inorder += inorder_traversal(right)
-            
-            return inorder
-        
-        root: nt.typedVar("_RTL_BALANCED_NODE", int) = self.VS_FreeChunkTree_Root(heap_address)
-        return inorder_traversal(root)
+        return self.traversal_rbtree(self.VS_FreeChunkTree_Root(heap_address))
     
     def print_vs(self, heap_address: int) -> None:
         freed_chunks = self.VS_FreeChunkTree_Inorder(heap_address)
         
         dprint.banner_print(f" [+] VS Heap ({heap_address:#x}) ")
-        for chunk in freed_chunks:
-            chunk = nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk)
-            rbtree_node = nt.typedVar("_RTL_BALANCED_NODE", int(chunk) + 0x8)
+        for rbtree_node in freed_chunks:
+            chunk = nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", rbtree_node - 8)
             
             if not pykd.isValid(chunk):
                 dprint.println(colour.red(f"0x{chunk:08x} is invalid address"), dml=True)
                 continue
             chunk_Sizes = self.VS_decode_chunk_Sizes(chunk)
+            isroot = (chunk == self.VS_FreeChunkTree_Root(heap_address) - 8)
             
-            parent = (rbtree_node.ParentValue - rbtree_node.Red) - 0x8 if (rbtree_node.ParentValue - rbtree_node.Red) != 0 else 0
-            left = rbtree_node.Left - 0x8 if rbtree_node.Left != 0 else 0
-            right = rbtree_node.Right - 0x8 if rbtree_node.Right != 0 else 0
-            
-            if chunk == self.VS_FreeChunkTree_Root(heap_address) - 8:
+            if isroot:
                 dprint.println(colour.brown("Root"), dml=True)
-            dprint.println(f"addr: {colour.colorize_hex_by_address(int(chunk))}", dml=True)
+            dprint.print(f"addr: {colour.colorize_hex_by_address(int(chunk))}", dml=True)
+            check_rbtree = self.check_rbtree_node(rbtree_node, isroot)
+            if check_rbtree[0]:
+                dprint.print_newline()
+            else:
+                dprint.println(colour.red(" " *30 + f"({', '.join(check_rbtree[1])})"), dml=True)
             dprint.println(f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_hex_by_address(int(chunk - chunk_Sizes.ActualSize))}", dml=True)
-            dprint.print(f"Parent: {colour.colorize_hex_by_address(parent)}, Left: {colour.colorize_hex_by_address(left)}, Right: {colour.colorize_hex_by_address(right)}", dml=True)
+            dprint.println(f"Parent: {colour.colorize_hex_by_address(rbtree_node.ParentValue)}, Left: {colour.colorize_hex_by_address(rbtree_node.Left)}, Right: {colour.colorize_hex_by_address(rbtree_node.Right)}", dml=True)
             
             dprint.print_newline()
-
-            dprint.println("\n")
         dprint.banner_print("")
             
     def _HEAP_SEG_CONTEXT(self, segment_address: int) -> nt.typedVar("_HEAP_SEG_CONTEXT", int):
@@ -1886,25 +1930,8 @@ class SegmentHeap(ListEntry):
         else:
             return nt.typedVar("_RTL_BALANCED_NODE", self.Seg_FreePageRanges(segment_address).Root ^ int(self.Seg_FreePageRanges(segment_address)))
         
-    def Seg_FreePageRanges_Inorder(self, segment_address: int) -> list:
-            
-            def inorder_traversal(node) -> None:
-                inorder = []
-                
-                if node == 0:
-                    return []
-                left = node.Left
-                right = node.Right
-                if left != 0:
-                    inorder += inorder_traversal(left)
-                inorder += [node]
-                if right != 0:
-                    inorder += inorder_traversal(right)
-                
-                return inorder
-            
-            root: nt.typedVar("_RTL_BALANCED_NODE", int) = self.Seg_FreePageRanges_Root(segment_address)
-            return inorder_traversal(root)
+    def Seg_FreePageRanges_Inorder(self, segment_address: int) -> typing.List[any]:
+        return self.traversal_rbtree(self.Seg_FreePageRanges_Root(segment_address))
         
     def _HEAP_PAGE_RANGE_DESCRIPTOR(self, page_range_descriptor_address: int) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
         return nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", page_range_descriptor_address)
