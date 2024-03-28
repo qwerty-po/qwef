@@ -779,9 +779,17 @@ class ContextManager():
             pass
         dprint.banner_print("", colour.blue)
     
+    def arch_base_size(self) -> int:
+        if self.arch == pykd.CPUType.AMD64:
+            return 8
+        elif self.arch == pykd.CPUType.I386:
+            return 4
+        else:
+            raise RuntimeError("Unsupported CPU mode")
+    
     def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
         printst: str = ""
-        printsz: int = 8 if self.arch == pykd.CPUType.I386 else 16
+        printsz: int = self.arch_base_size()
         dprint.print(f" {colour.colorize_hex_by_address(value, printsz)}", dml=True)
         
         if memoryaccess.get_symbol(value) is not None:
@@ -885,7 +893,13 @@ class ContextManager():
                 dprint.println(colour.white(f"   {code_str}"), dml=True)
                 
     def print_stack(self) -> None:
-        sp = self.regs.rsp if self.arch == pykd.CPUType.AMD64 else self.regs.esp
+        sp = 0
+        if self.arch == pykd.CPUType.AMD64:
+            sp = self.regs.rsp
+        elif self.arch == pykd.CPUType.I386:
+            sp = self.regs.esp
+        else:
+            raise RuntimeError("Unsupported CPU mode")
         
         if self.arch == pykd.CPUType.I386:
             for offset in range(8):
@@ -1095,14 +1109,66 @@ class SearchPattern():
                     
             dprint.success_print("Searching pattern finished")
 
-@dataclass
 class ListEntry():
-    Flink: int
-    Blink: int
+    def __init__(self):
+        pass
     
-    def __init__(self, Flink: int, Blink: int) -> None:
-        self.Flink: int = Flink
-        self.Blink: int = Blink
+    def return_check_listentry(self, error: typing.List[str]):
+        return (True if error == [] else False, error)
+    
+    def check_listentry(self, listentry: nt.typedVar("_LIST_ENTRY", int)) -> typing.Tuple[bool, str]:
+        error = []
+        
+        if not pykd.isValid(listentry):
+            return (False, f"listentry({colour.colorize_hex_by_address(listentry)}) is Invalid address")
+        
+        if not pykd.isValid(listentry.Flink):
+            error.append(f"listentry.Flink({colour.colorize_hex_by_address(listentry.Flink)}) is Invalid address")
+        if not pykd.isValid(listentry.Blink):
+            error.append(f"listentry.Blink({colour.colorize_hex_by_address(listentry.Blink)}) is Invalid address")
+        if error != []:
+            return self.return_check_listentry(error)
+        
+        if not pykd.isValid(listentry.Flink.Blink):
+            error.append(f"listentry.Flink.Blink({colour.colorize_hex_by_address(listentry.Flink.Blink)}) is Invalid address")
+        if not pykd.isValid(listentry.Blink.Flink):
+            error.append(f"listentry.Blink.Flink({colour.colorize_hex_by_address(listentry.Blink.Flink)}) is Invalid address")
+        if error != []:
+            return self.return_check_listentry(error)
+        
+        if listentry.Flink.Blink != listentry:
+            error.append("chunk->Flink->Blink != chunk")
+        if listentry.Blink.Flink != listentry:
+            error.append("chunk->Blink->Flink != chunk")
+        if error != []:
+            return self.return_check_listentry(error)
+
+        if listentry.Flink.Blink.Flink != listentry.Flink:
+            error.append("next_chunk->Blink->Flink != next_chunk")
+        
+        return self.return_check_listentry(error)
+
+    def traverse_list_entry(self, list_entry: nt.typedVar("_LIST_ENTRY", int)) -> typing.Tuple[typing.Tuple[bool, str], typing.List[any]]:
+        curr = list_entry
+        success = True
+        result = []
+        errorstr: str = ""
+        
+        while True:
+            if not pykd.isValid(curr):
+                success = False
+                errorstr = f"listentry({colour.colorize_hex_by_address(curr)}) is Invalid address"
+                break
+            if curr in result:
+                if curr != list_entry:
+                    success = False
+                    errorstr = f"listentry({colour.colorize_hex_by_address(curr)}) is already in list"
+                else:
+                    result.append(curr)
+                break
+            result.append(curr)
+            curr = curr.Flink
+        return (success, errorstr), result
 
 class TEB():
     def __init__(self):
@@ -1269,46 +1335,7 @@ class SEH(TEB):
                         
         dprint.banner_print("")
         
-class SanityCheck():
-    def __init__(self):
-        pass
-    
-    def return_result(self, error: typing.List[str]):
-        return (True if error == [] else False, error)
-    
-    def check_listentry(self, listentry: nt.typedVar("_LIST_ENTRY", int)) -> typing.Tuple[bool, str]:
-        error = []
-        
-        if not pykd.isValid(listentry):
-            return (False, f"listentry({colour.colorize_hex_by_address(listentry)}) is Invalid address")
-        
-        if not pykd.isValid(listentry.Flink):
-            error.append(f"listentry.Flink({colour.colorize_hex_by_address(listentry.Flink)}) is Invalid address")
-        if not pykd.isValid(listentry.Blink):
-            error.append(f"listentry.Blink({colour.colorize_hex_by_address(listentry.Blink)}) is Invalid address")
-        if error != []:
-            return self.return_result(error)
-        
-        if not pykd.isValid(listentry.Flink.Blink):
-            error.append(f"listentry.Flink.Blink({colour.colorize_hex_by_address(listentry.Flink.Blink)}) is Invalid address")
-        if not pykd.isValid(listentry.Blink.Flink):
-            error.append(f"listentry.Blink.Flink({colour.colorize_hex_by_address(listentry.Blink.Flink)}) is Invalid address")
-        if error != []:
-            return self.return_result(error)
-        
-        if listentry.Flink.Blink != listentry:
-            error.append("chunk->Flink->Blink != chunk")
-        if listentry.Blink.Flink != listentry:
-            error.append("chunk->Blink->Flink != chunk")
-        if error != []:
-            return self.return_result(error)
-
-        if listentry.Flink.Blink.Flink != listentry.Flink:
-            error.append("next_chunk->Blink->Flink != next_chunk")
-        
-        return self.return_result(error)
-        
-class NTHeap(SanityCheck):
+class NTHeap(ListEntry):
     def __init__(self):
         pass
         
@@ -1317,35 +1344,14 @@ class NTHeap(SanityCheck):
     
     def get_freelist(self, heap_address: int) -> typing.List[int]:
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        freelist: typing.List[int] = []
-        freelist.append(int(heap.FreeLists))
-        next_list = nt.typedVar("_LIST_ENTRY", int(heap.FreeLists.Flink))
-        while True:
-            freelist.append(int(next_list))
-            if not pykd.isValid(next_list):
-                break
-            elif next_list == heap.FreeLists:
-                break
-            elif next_list in freelist:
-                break
-            next_list = nt.typedVar("_LIST_ENTRY", next_list.Flink)
-        return freelist
+        return self.traverse_list_entry(heap.FreeLists)[1]
     
     def get_freelist_in_blocksindex(self, blockindex_address: int) -> typing.List[int]:
         freelist: typing.List[int] = []
         blockindex = nt.typedVar("_HEAP_LIST_LOOKUP", blockindex_address)
         if blockindex == 0:
             return []
-        freelist.append(int(blockindex.ListHead))
-        next_list = nt.typedVar("_LIST_ENTRY", int(blockindex.ListHead.Flink))
-        while True:
-            freelist.append(int(next_list))
-            if not pykd.isValid(next_list):
-                break
-            elif next_list == blockindex.ListHead:
-                break
-            next_list = nt.typedVar("_LIST_ENTRY", next_list.Flink)
-        return freelist
+        return self.traverse_list_entry(blockindex.ListHead)[1]
     
     def get_blockindex_list(self, heap_address: int)    :
         heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
@@ -1430,6 +1436,8 @@ class NTHeap(SanityCheck):
             return target << 3
         elif context.arch == pykd.CPUType.AMD64:
             return target << 4
+        else:
+            raise RuntimeError("Unsupported CPU mode")
         
     
     def is_valid_smalltagindex(self, chunk, encoding) -> int:
@@ -1531,15 +1539,22 @@ class NTHeap(SanityCheck):
             except pykd.MemoryException:
                 continue
             
-            chunk_size: int = active_subseg.BlockSize << 4 if context.arch == pykd.CPUType.AMD64 else active_subseg.BlockSize << 3
+            chunk_size: int = 0
+            if context.arch == pykd.CPUType.I386:
+                chunk_size = active_subseg.BlockSize << 3
+            elif context.arch == pykd.CPUType.AMD64:
+                chunk_size = active_subseg.BlockSize << 4
+            else:
+                raise RuntimeError("Unsupported CPU mode")
+
             heap_entry_start: int = int(user_block) + nt.sizeof("_HEAP_USERDATA_HEADER") + 0x8
             
             if aggregate_exchg.Depth == 0:
-                dprint.println(colour.white(f"segment {i:#x} is full ({colour.colorize_string_by_address(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
-                dprint.println(f"heap entry start: {heap_entry_start:#x}")
+                dprint.println(colour.white(f"segment {i:#x} is full ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"), dml=True)
+                dprint.println(f"heap entry start: {colour.colorize_hex_by_address(heap_entry_start)}")
             else:
-                dprint.println(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_string_by_address(f'{int(user_block):#x}', user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
-                dprint.println(f"heap entry start: {colour.colorize_string_by_address(f'{heap_entry_start:#x}', heap_entry_start)}", dml=True)
+                dprint.println(colour.white(f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"), dml=True)
+                dprint.println(f"heap entry start: {colour.colorize_hex_by_address(heap_entry_start)}", dml=True)
                 dprint.print("busybitmap: ")
                 busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar("_RTL_BITMAP", int(user_block.BusyBitmap))
                 bitvalue: int = memoryaccess.get_qword_datas(int(busybitmap.Buffer), 1)[0]
@@ -1554,14 +1569,14 @@ class NTHeap(SanityCheck):
             for j, cacheditem in enumerate(cacheditems):
                 if cacheditem != 0:
                     try:
-                        dprint.println(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_string_by_address(f'{cacheditem:#x}', cacheditem)}"), dml=True)
+                        dprint.println(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_hex_by_address(cacheditem)}"), dml=True)
                     except pykd.MemoryException:
-                        dprint.println(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_string_by_address(f'{cacheditem:#x}', cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
+                        dprint.println(colour.white(f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_hex_by_address(cacheditem)} {colour.red(f'( invalid chunk address )')}"), dml=True)
             dprint.print_newline()
             
         dprint.banner_print("")
             
-class SegmentHeap():
+class SegmentHeap(ListEntry):
     def __init__(self):
         self._RTLP_HP_HEAP_GLOBALS = nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
         self.buckets_cnt = 130
@@ -1727,7 +1742,7 @@ class SegmentHeap():
         if banner:
             dprint.banner_print("")
     
-    def print_lfh(self, heap_address: int, size: int) -> None:
+    def print_lfh(self, heap_address: int, size: int = -1) -> None:
         dprint.banner_print(f" [+] LFH Heap ({heap_address:#x}) ")
         avaliable_segments_idx = []
         for bucket in self.LFH_Buckets(heap_address):
@@ -1971,7 +1986,12 @@ class Heap(PEB):
         return True if nt.typedVar("_SEGMENT_HEAP", heap_address).Signature == 0xddeeddee else False
     
     def analysis_chunk(self, chunk_address: int):
-        info = pykd.dbgCommand(f"!heap -x {hex(chunk_address)}").split("\n")[3:]
+        info = pykd.dbgCommand(f"!heap -x {hex(chunk_address)}")
+        if info == None:
+            dprint.fail_print("Invalid chunk address")
+            return
+        
+        info = info.split("\n")[3:]
         info_dict = {}
         chunk_info = {}
         
@@ -1980,7 +2000,11 @@ class Heap(PEB):
                 continue
             key, value = line.split(":")[0].strip(), line.split(":")[1].strip()
             info_dict[key] = value
-            
+        
+        if "Chunk header address" not in info_dict or "Heap Address" not in info_dict:
+            dprint.fail_print(f"Analysis failed, please check the chunk address ({colour.colorize_hex_by_address(chunk_address)})")
+            return
+        
         if "Variable size allocated chunk" in info_dict["Allocation status"]:
             chunk_info["status"] = "VS"
             chunk_info["chunk_address"] = int(info_dict["Chunk header address"], 16)
@@ -2036,8 +2060,7 @@ class Heap(PEB):
             if size != -1:
                 self.SegmentHeap.print_lfh(heap_address, size)
             else:
-                self.SegmentHeap.print_lfh(heap_address, -1)
-                # dprint.println(colour.white(f"[-] Please specify the size of the bucket"), dml=True)
+                self.SegmentHeap.print_lfh(heap_address)
         else:
             dprint.fail_print("Heap type is not supported")
     
