@@ -579,7 +579,6 @@ class Vmmap():
         return section_info
     
     def dump_section(self, reload=False) -> typing.List[SectionInfo]:
-        
         if self.dump_section_info is not None and reload is False:
             return self.dump_section_info
         
@@ -784,6 +783,7 @@ class ContextManager():
         printst: str = ""
         printsz: int = 8 if self.arch == pykd.CPUType.I386 else 16
         dprint.print(f" {colour.colorize_hex_by_address(value, printsz)}", dml=True)
+        
         if memoryaccess.get_symbol(value) is not None:
             dprint.print(f" <{colour.white(memoryaccess.get_symbol(value))}>", dml=True)
             
@@ -1268,7 +1268,47 @@ class SEH(TEB):
                         dprint.println(f" " * 12 + f"unknown exception handler type")
                         
         dprint.banner_print("")
-class NTHeap():
+        
+class SanityCheck():
+    def __init__(self):
+        pass
+    
+    def return_result(self, error: typing.List[str]):
+        return (True if error == [] else False, error)
+    
+    def check_listentry(self, listentry: nt.typedVar("_LIST_ENTRY", int)) -> typing.Tuple[bool, str]:
+        error = []
+        
+        if not pykd.isValid(listentry):
+            return (False, f"listentry({colour.colorize_hex_by_address(listentry)}) is Invalid address")
+        
+        if not pykd.isValid(listentry.Flink):
+            error.append(f"listentry.Flink({colour.colorize_hex_by_address(listentry.Flink)}) is Invalid address")
+        if not pykd.isValid(listentry.Blink):
+            error.append(f"listentry.Blink({colour.colorize_hex_by_address(listentry.Blink)}) is Invalid address")
+        if error != []:
+            return self.return_result(error)
+        
+        if not pykd.isValid(listentry.Flink.Blink):
+            error.append(f"listentry.Flink.Blink({colour.colorize_hex_by_address(listentry.Flink.Blink)}) is Invalid address")
+        if not pykd.isValid(listentry.Blink.Flink):
+            error.append(f"listentry.Blink.Flink({colour.colorize_hex_by_address(listentry.Blink.Flink)}) is Invalid address")
+        if error != []:
+            return self.return_result(error)
+        
+        if listentry.Flink.Blink != listentry:
+            error.append("chunk->Flink->Blink != chunk")
+        if listentry.Blink.Flink != listentry:
+            error.append("chunk->Blink->Flink != chunk")
+        if error != []:
+            return self.return_result(error)
+
+        if listentry.Flink.Blink.Flink != listentry.Flink:
+            error.append("next_chunk->Blink->Flink != next_chunk")
+        
+        return self.return_result(error)
+        
+class NTHeap(SanityCheck):
     def __init__(self):
         pass
         
@@ -1462,15 +1502,11 @@ class NTHeap():
                     dprint.print_newline()
                     
                 if i != len(freelist) - 1:
-                    if linked_list.Flink.Blink != linked_list_addr:
-                        if not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list_addr:
-                            dprint.println(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk, next_chunk->Blink->Flink != next_chunk)"), dml=True)
-                        else:
-                            dprint.println(colour.red(f"     ↕️     (chunk->Flink->Blink != chunk)"), dml=True)
-                    elif not pykd.isValid(linked_list.Flink) or not pykd.isValid(linked_list.Flink.Blink) or linked_list.Flink.Blink.Flink != linked_list.Flink:
-                        dprint.println(colour.red(f"     ↕️     (next_chunk->Blink->Flink != next_chunk)"), dml=True)
-                    else:
+                    sanity_result = self.check_listentry(linked_list)
+                    if sanity_result[0]:
                         dprint.println(f"     ↕️")
+                    else:
+                        dprint.println(colour.red(f"     ↕️     ({', '.join(sanity_result[1])})"), True)
             dprint.banner_print("")
             
     def print_lfh(self, heap_address: int) -> None:
@@ -1528,6 +1564,7 @@ class NTHeap():
 class SegmentHeap():
     def __init__(self):
         self._RTLP_HP_HEAP_GLOBALS = nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
+        self.buckets_cnt = 130
         pass
 
     def _SEGMENT_HEAP(self, heap_address: int) -> nt.typedVar("_SEGMENT_HEAP", int):
@@ -1549,7 +1586,7 @@ class SegmentHeap():
         lfhcontext: nt.typedVar("_HEAP_LFH_CONTEXT", int) = self.LFHContext(heap_address)
         buckets: typing.List[nt.typedVar("_HEAP_LFH_BUCKET", int)] = []
         
-        for i in range(0, 129+1):
+        for i in range(0, self.buckets_cnt):
             buckets.append(nt.typedVar("_HEAP_LFH_BUCKET", lfhcontext.Buckets[i]))
         
         return buckets
@@ -1590,12 +1627,12 @@ class SegmentHeap():
     def _HEAP_LFH_SUBSEGMENT(self, subsegment_address: int) -> nt.typedVar("_HEAP_LFH_SUBSEGMENT", int):
         return nt.typedVar("_HEAP_LFH_SUBSEGMENT", subsegment_address)
     
-    def print_bucket(self, heap_address: int, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), size: int, banner = True) -> None:
+    def print_bucket(self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), size: int, banner = True) -> None:
         
         def print_lfh_subsegment(self, curr: int, size: int, once: bool) -> bool:            
             subsegment: nt.typedVar("_HEAP_LFH_SUBSEGMENT", int) = self._HEAP_LFH_SUBSEGMENT(curr)
             BlockCount: int = subsegment.BlockCount
-            FreeHint: int = subsegment.BlockCount
+            FreeHint: int = subsegment.FreeHint
             FreeCount: int = subsegment.FreeCount
             Location: int = subsegment.Location
             
@@ -1612,12 +1649,13 @@ class SegmentHeap():
             
             BlockBitmap: bytes = memoryaccess.get_bytes(subsegment.BlockBitmap, BlockCount/4 if BlockCount % 4 == 0 else BlockCount/4 + 1)
             
-            dprint.println(f"    Subsegment: {colour.colorize_string_by_address(f'{int(subsegment):#x}', int(subsegment))}", dml=True)
-            dprint.print(f"    Flink: {colour.colorize_string_by_address(f'{int(subsegment.ListEntry.Flink):#x}', int(subsegment.ListEntry.Flink))}, Blink: {colour.colorize_string_by_address(f'{int(subsegment.ListEntry.Blink):#x}', int(subsegment.ListEntry.Blink   ))}", dml=True)
-            if not pykd.isValid(subsegment.ListEntry.Flink) or subsegment.ListEntry.Flink.Blink != int(subsegment):
-                dprint.print(colour.red(f" (Subsegment->Flink->Blink != Subsegment)"), dml=True)
-            if not pykd.isValid(subsegment.ListEntry.Blink) or subsegment.ListEntry.Blink.Flink != int(subsegment):
-                dprint.print(colour.red(f" (Subsegment->Blink->Flink != Subsegment)"), dml=True)
+            dprint.println(f"    Subsegment: {colour.colorize_hex_by_address(int(subsegment))}", dml=True)
+            dprint.print(f"    Flink: {colour.colorize_hex_by_address(int(subsegment.ListEntry.Flink))}, Blink: {colour.colorize_hex_by_address(int(subsegment.ListEntry.Blink))}", dml=True)
+            sanity_result = self.check_listentry(subsegment.ListEntry)
+            if sanity_result[0]:
+                pass
+            else:
+                dprint.print(colour.red(f" ({', '.join(sanity_result[1])})"), dml=True)
             dprint.print_newline()
                 
             dprint.println(f"    BlockSize : {colour.blue(f'{BlockSize:#x}')}", dml=True)
@@ -1706,7 +1744,7 @@ class SegmentHeap():
         
         for bucket in self.LFH_Buckets(heap_address):
             if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(bucket, 0):
-                self.print_bucket(heap_address, bucket, size, False)
+                self.print_bucket(bucket, size, False)
             if pykd.isValid(bucket) and self.Bucket_Affinity_FullSubsegmentList(bucket, 0):
                 avaliable_segments_idx.append(self.BucketIndex(bucket))
         dprint.banner_print("")
@@ -2098,7 +2136,6 @@ ror = lambda val, r_bits, max_bits: \
     (val << (max_bits-(r_bits%max_bits)) & (2**max_bits-1))
 
 if __name__ == "__main__":
-    
     ## register commands
     cmd.alias("vmmap", "vmmap")
     
