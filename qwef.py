@@ -537,6 +537,7 @@ class SectionInfo:
         self.state: PageState = PageState.MEM_FREE
         self.protect: PageProtect = PageProtect.PAGE_NOACCESS
         self.type: PageType = PageType.MEM_PRIVATE
+        
 class Vmmap():
     
     def __init__(self):
