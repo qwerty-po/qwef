@@ -795,7 +795,7 @@ class ContextManager():
     
     def deep_print(self, value: int, remain: int, xref: int = 0) -> None:
         printst: str = ""
-        printsz: int = self.arch_base_size()
+        printsz: int = self.arch_base_size()*2
         dprint.print(f" {colour.colorize_hex_by_address(value, printsz)}", dml=True)
         
         if memoryaccess.get_symbol(value) is not None:
