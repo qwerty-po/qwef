@@ -11,8 +11,10 @@ from dataclasses import asdict, dataclass, fields
 
 import pykd
 
-nt = pykd.module("ntdll")
-ucrtbase = pykd.module("ucrtbase")
+try:
+    nt = pykd.module("ntdll")
+except:
+    pass
 
 
 def p64(value: int) -> bytes:
