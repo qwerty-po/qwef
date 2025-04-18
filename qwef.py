@@ -2,12 +2,11 @@ import enum
 import json
 import math
 import os
-import re
 import string
 import sys
 import tempfile
 import typing
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 
 import pykd
 
@@ -31,7 +30,6 @@ class CmdManager:
 
 
 class ColourManager:
-
     def __init__(self):
         self.RED = ("srcpair", "norbg")
         self.BLUE = ("srckw", "norbg")
@@ -98,7 +96,7 @@ class ColourManager:
         if type(address) is not int:
             try:
                 address = int(address)
-            except:
+            except ValueError:
                 raise ValueError("Type can't change to integer")
         target = f"{address:#x}" if strsz == -1 else f"0x{address:0{strsz}x}"
         return self.address_color(address)(target)
@@ -108,31 +106,6 @@ class ColourManager:
 
 
 colour: ColourManager = ColourManager()
-
-# class I386RegisterEnum(enum.IntEnum):
-#     eax = 0; ebx = 1; ecx = 2; edx = 3
-#     edi = 4; esi = 5; ebp = 6; esp = 7
-#     eip = 8
-
-#     def __str__(self) -> str:
-#         return self.name
-
-# class Amd64RegisterEnum(enum.IntEnum):
-#     rax = 0; rbx = 1; rcx = 2; rdx = 3
-#     rdi = 4; rsi = 5; rbp = 6; rsp = 7
-#     r8 = 8; r9 = 9; r10 = 10; r11 = 11
-#     r12 = 12; r13 = 13; r14 = 14; r15 = 15
-#     rip = 16
-
-#     def __str__(self) -> str:
-#         return self.name
-
-# class SegmentRegisterEnum(enum.IntEnum):
-#     cs = 0; ds = 1; es = 2; fs = 3
-#     gs = 4; ss = 5
-
-#     def __str__(self) -> str:
-#         return self.name
 
 
 class EflagsEnum(enum.IntEnum):
@@ -637,7 +610,6 @@ class SectionInfo:
 
 
 class Vmmap:
-
     def __init__(self):
         self.dump_section_info = None
         self.dump_section(True)
@@ -712,20 +684,16 @@ class Vmmap:
     def print_vmmap(self, level: int = 0):
         for section_info in self.dump_section():
             if pykd.CPUType.AMD64 == pykd.getCPUMode():
-                addr_info: str = (
-                    f"0x{section_info.base_address:016x} - 0x{section_info.end_address:016x} 0x{section_info.size:011x}"
-                )
+                addr_info: str = f"0x{section_info.base_address:016x} - 0x{section_info.end_address:016x} 0x{section_info.size:011x}"
             elif pykd.CPUType.I386 == pykd.getCPUMode():
-                addr_info: str = (
-                    f"0x{section_info.base_address:08x} - 0x{section_info.end_address:08x} 0x{section_info.size:08x}"
-                )
+                addr_info: str = f"0x{section_info.base_address:08x} - 0x{section_info.end_address:08x} 0x{section_info.size:08x}"
             state_info: str = ""
             priv_info: str = ""
             guard_info: str = ""
             type_info: str = ""
             path_info: str = ""
 
-            clr: function = colour.white
+            clr: typing.Callable = colour.white
 
             if PageState.is_free(section_info.state):
                 clr = colour.gray
@@ -805,7 +773,6 @@ class Vmmap:
 
 
 class PrintManager:
-
     def __init__(self):
         self.banner_size = 160
         self.query: typing.List[typing.Tuple[str, bool]] = []
@@ -846,7 +813,6 @@ class PrintManager:
 
 
 class ContextManager:
-
     def __init__(self):
         self.arch = pykd.getCPUMode()
         self.regs: typing.Union[Amd64Register, I386Register]
@@ -946,7 +912,7 @@ class ContextManager:
     def print_general_regs(self) -> None:
         for reg, vaule in asdict(self.regs).items():
             dprint.print(colour.red(f"{reg:4}"), dml=True)
-            dprint.print(f": ")
+            dprint.print(": ")
             self.deep_print(vaule, 5)
 
     def print_seg_regs(self) -> None:
@@ -1034,12 +1000,12 @@ class ContextManager:
 
         if self.arch == pykd.CPUType.I386:
             for offset in range(8):
-                dprint.print(f"[sp + {offset*4:02x}] ")
+                dprint.print(f"[sp + {offset * 4:02x}] ")
                 addr = sp + offset * 4
                 self.deep_print(addr, 2)
         else:
             for offset in range(8):
-                dprint.print(f"[sp + {offset*8:02x}] ")
+                dprint.print(f"[sp + {offset * 8:02x}] ")
                 addr = sp + offset * 8
                 self.deep_print(addr, 2)
 
@@ -1127,7 +1093,6 @@ class SearchPattern:
         end: int = 0xFFFFFFFFFFFFFFFF,
         level: int = 0,
     ) -> None:
-
         find_int_mode: bool = False
         search_value: typing.Union[int, str]
 
@@ -1166,7 +1131,7 @@ class SearchPattern:
                 return
 
             dprint.trying_print(
-                f"Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"
+                f"Searching {hex(search_value)} pattern in {'whole memory' if (start == 0 and end == (1 << 64) - 1) else 'given section'}"
             )
 
             for section in vmmap.dump_section():
@@ -1203,7 +1168,7 @@ class SearchPattern:
                         dprint.success_print(
                             f"In {colour.blue(info)} ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])"
                         )
-                    dprint.print(f":\t")
+                    dprint.print(":\t")
 
                     for data in hex_datas:
                         dprint.print(f"0x{data:016x} ")
@@ -1218,11 +1183,11 @@ class SearchPattern:
                                 dprint.print(".")
                     dprint.println(" |")
 
-            dprint.success_print(f"Searching pattern finished")
+            dprint.success_print("Searching pattern finished")
 
         else:
             dprint.trying_print(
-                f"Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1<<64)-1) else 'given section'}"
+                f"Searching '{search_value}' pattern in {'whole memory' if (start == 0 and end == (1 << 64) - 1) else 'given section'}"
             )
 
             for section in vmmap.dump_section():
@@ -1253,7 +1218,7 @@ class SearchPattern:
                             f"In '{colour.blue(info)}' ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])"
                         )
                     dprint.print(colour.white(f"0x{(addr):016x}"), dml=True)
-                    dprint.print(f":\t")
+                    dprint.print(":\t")
 
                     memval: bytes = memoryaccess.get_bytes(addr, 0x10)
 
@@ -1399,11 +1364,11 @@ class RBTree:
 
         if node.Left != 0 and node.Left.ParentValue & ~(0b11) != node:
             error.append(
-                f"node.Left.ParentValue({int(node.Left.ParentValue&~(0b11)):#x}) != node({int(node):#x})"
+                f"node.Left.ParentValue({int(node.Left.ParentValue & ~(0b11)):#x}) != node({int(node):#x})"
             )
         if node.Right != 0 and node.Right.ParentValue & ~(0b11) != node:
             error.append(
-                f"node.Right.ParentValue({int(node.Right.ParentValue&~(0b11)):#x}) != node({int(node):#x})"
+                f"node.Right.ParentValue({int(node.Right.ParentValue & ~(0b11)):#x}) != node({int(node):#x})"
             )
         return self.return_check_rbtree(error)
 
@@ -1609,7 +1574,7 @@ class SEH(TEB):
             if self.exceptone:
                 self.exceptone = False
             else:
-                dprint.println(f"     ↓")
+                dprint.println("     ↓")
 
             if sehinfo.Next is None:
                 dprint.println(f"0x{sehinfo.Curr:08x}: (chain is broken)")
@@ -1622,29 +1587,29 @@ class SEH(TEB):
                 if memoryaccess.get_symbol(sehinfo.Handler) is not None:
                     dprint.println(f"<{memoryaccess.get_symbol(sehinfo.Handler)}>")
                 elif not pykd.isValid(sehinfo.Handler):
-                    dprint.println(f"<invalid address>")
+                    dprint.println("<invalid address>")
                     continue
                 else:
-                    dprint.println(f"")
+                    dprint.println("")
 
                 if sehinfo.Next == context.ptrmask:
-                    dprint.println(f"     ↓\n(end of chain)")
+                    dprint.println("     ↓\n(end of chain)")
                 else:
                     try_level = self.get_try_level(sehinfo)
                     if try_level == 0xFFFFFFFF or try_level == 0xFFFFFFFE:
-                        pykd.println(f" " * 12 + f"try_level < 0, not in try block")
+                        pykd.println(" " * 12 + "try_level < 0, not in try block")
                     old_esp, exc_ptr = self.get_esp_and_exc_ptr(sehinfo)
 
                     seh_handler_info = self.get_except_handler_info(sehinfo)
                     if seh_handler_info is not None:
                         EnclosingLevel, FilterFunc, HandlerFunc = seh_handler_info
                         dprint.println(
-                            f" " * 12
+                            " " * 12
                             + f"old_esp: {colour.colorize_hex_by_address(old_esp, 8)}, exc_ptr: {colour.colorize_hex_by_address(exc_ptr, 8)}, try_level: {try_level}, EnclosingLevel: 0x{EnclosingLevel:08x}, FilterFunc: {colour.colorize_hex_by_address(FilterFunc, 8)}, HandlerFunc: {colour.colorize_hex_by_address(HandlerFunc, 8)}",
                             dml=True,
                         )
                     else:
-                        dprint.println(f" " * 12 + f"unknown exception handler type")
+                        dprint.println(" " * 12 + "unknown exception handler type")
 
         dprint.banner_print("")
 
@@ -1832,7 +1797,7 @@ class NTHeap(ListEntry):
 
                 if not pykd.isValid(linked_list):
                     dprint.print(colour.red(f"0x{addr:08x} "), dml=True)
-                    dprint.println(colour.white(f"| <invalid address> |"), dml=True)
+                    dprint.println(colour.white("| <invalid address> |"), dml=True)
                 else:
                     dprint.print(
                         colour.white(
@@ -1853,7 +1818,7 @@ class NTHeap(ListEntry):
                         )
 
                         if chunk_idx >= len(listhint):
-                            dprint.print(colour.white(f" (out of list hint)"), dml=True)
+                            dprint.print(colour.white(" (out of list hint)"), dml=True)
                         elif listhint[chunk_idx] == (True, linked_list_addr):
                             dprint.print(
                                 colour.white(f" (list hint at [{chunk_idx:#x}])"),
@@ -1884,7 +1849,7 @@ class NTHeap(ListEntry):
                 if i != len(freelist) - 1:
                     sanity_result = self.check_listentry(linked_list)
                     if sanity_result[0]:
-                        dprint.println(f"     ↕️")
+                        dprint.println("     ↕️")
                     else:
                         dprint.println(
                             colour.red(f"     ↕️     ({', '.join(sanity_result[1])})"),
@@ -1951,7 +1916,7 @@ class NTHeap(ListEntry):
             else:
                 dprint.println(
                     colour.white(
-                        f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size   :#x}')})"
+                        f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"
                     ),
                     dml=True,
                 )
@@ -1986,7 +1951,7 @@ class NTHeap(ListEntry):
                     except pykd.MemoryException:
                         dprint.println(
                             colour.white(
-                                f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_hex_by_address(cacheditem)} {colour.red(f'( invalid chunk address )')}"
+                                f"cacheditems[{j}] (_HEAP_SUBSEGMENT *): {colour.colorize_hex_by_address(cacheditem)} {colour.red('( invalid chunk address )')}"
                             ),
                             dml=True,
                         )
@@ -2017,14 +1982,14 @@ class SegmentHeap(ListEntry, RBTree):
             "_HEAP_LFH_CONTEXT", self._SEGMENT_HEAP(heap_address).LfhContext
         )
 
-    def SegContexts(
-        self, heap_address: int
-    ) -> nt.typedVar("_HEAP_SEG_CONTEXT[2]", int):
+    def SegContexts(self, heap_address: int) -> nt.typedVar(
+        "_HEAP_SEG_CONTEXT[2]", int
+    ):
         return self._SEGMENT_HEAP(heap_address).SegContexts
 
-    def LFH_Callback(
-        self, heap_address: int
-    ) -> nt.typedVar("_HEAP_SUBALLOCATOR_CALLBACKS", int):
+    def LFH_Callback(self, heap_address: int) -> nt.typedVar(
+        "_HEAP_SUBALLOCATOR_CALLBACKS", int
+    ):
         return self.LFHContext(heap_address).Callbacks
 
     def LFH_Buckets(self, heap_address: int) -> typing.List[any]:
@@ -2038,9 +2003,9 @@ class SegmentHeap(ListEntry, RBTree):
 
         return buckets
 
-    def LFH_Bucket(
-        self, heap_address: int, idx: int
-    ) -> nt.typedVar("_HEAP_LFH_BUCKET", int):
+    def LFH_Bucket(self, heap_address: int, idx: int) -> nt.typedVar(
+        "_HEAP_LFH_BUCKET", int
+    ):
         return nt.typedVar(
             "_HEAP_LFH_BUCKET", self.LFHContext(heap_address).Buckets[idx]
         )
@@ -2094,15 +2059,14 @@ class SegmentHeap(ListEntry, RBTree):
     ) -> nt.typedVar("_LIST_ENTRY", int):
         return self.Bucket_AffinitySlot(bucket, idx).State.FullSubsegmentList
 
-    def _HEAP_LFH_SUBSEGMENT(
-        self, subsegment_address: int
-    ) -> nt.typedVar("_HEAP_LFH_SUBSEGMENT", int):
+    def _HEAP_LFH_SUBSEGMENT(self, subsegment_address: int) -> nt.typedVar(
+        "_HEAP_LFH_SUBSEGMENT", int
+    ):
         return nt.typedVar("_HEAP_LFH_SUBSEGMENT", subsegment_address)
 
     def print_bucket(
         self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), size: int, banner=True
     ) -> None:
-
         def print_lfh_subsegment(self, curr: int, size: int, once: bool) -> bool:
             subsegment: nt.typedVar("_HEAP_LFH_SUBSEGMENT", int) = (
                 self._HEAP_LFH_SUBSEGMENT(curr)
@@ -2160,11 +2124,11 @@ class SegmentHeap(ListEntry, RBTree):
             dprint.println(
                 f"Location: {colour.white(f'{LocationEnum[Location]}')}", dml=True
             )
-            dprint.print(f"    ")
+            dprint.print("    ")
 
             if BlockCount > 0x800:
                 dprint.println(
-                    f"    BlockBitmap: {colour.red(f'(too large to print)')}", dml=True
+                    f"    BlockBitmap: {colour.red('(too large to print)')}", dml=True
                 )
                 dprint.print_newline()
                 return once
@@ -2183,7 +2147,7 @@ class SegmentHeap(ListEntry, RBTree):
 
                 if (i + 1) % 16 == 0:
                     dprint.print_newline()
-                    dprint.print(f"    ")
+                    dprint.print("    ")
 
             dprint.print_newline()
             dprint.print_newline()
@@ -2242,12 +2206,12 @@ class SegmentHeap(ListEntry, RBTree):
                 bucket, 0
             ):
                 avaliable_segments_idx.append(self.BucketIndex(bucket))
-        dprint.print(colour.white(f"avaliable segments: "), dml=True)
+        dprint.print(colour.white("avaliable segments: "), dml=True)
 
         for i, idx in enumerate(avaliable_segments_idx):
             if i % 10 == 0 and i != 0:
                 dprint.print_newline()
-                dprint.print(colour.white(f"                    "), dml=True)
+                dprint.print(colour.white("                    "), dml=True)
             dprint.print(colour.white(f"{idx * 0x10:#x} "), dml=True)
         dprint.println("\n")
 
@@ -2262,14 +2226,14 @@ class SegmentHeap(ListEntry, RBTree):
                 avaliable_segments_idx.append(self.BucketIndex(bucket))
         dprint.banner_print("")
 
-    def VS_Callback(
-        self, heap_address: int
-    ) -> nt.typedVar("_HEAP_SUBALLOCATOR_CALLBACKS", int):
+    def VS_Callback(self, heap_address: int) -> nt.typedVar(
+        "_HEAP_SUBALLOCATOR_CALLBACKS", int
+    ):
         return self.VSContext(heap_address).Callbacks
 
-    def VS_FreeChunkTree_Root(
-        self, heap_address: int
-    ) -> nt.typedVar("_RTL_BALANCED_NODE", int):
+    def VS_FreeChunkTree_Root(self, heap_address: int) -> nt.typedVar(
+        "_RTL_BALANCED_NODE", int
+    ):
         if self.VSContext(heap_address).FreeChunkTree.Encoded == 0:
             return nt.typedVar(
                 "_RTL_BALANCED_NODE", self.VSContext(heap_address).FreeChunkTree.Root
@@ -2281,14 +2245,14 @@ class SegmentHeap(ListEntry, RBTree):
                 ^ int(self.VSContext(heap_address).FreeChunkTree),
             )
 
-    def VS_inuse_chunk_header(
-        self, chunk_address: int
-    ) -> nt.typedVar("_HEAP_VS_CHUNK_HEADER", int):
+    def VS_inuse_chunk_header(self, chunk_address: int) -> nt.typedVar(
+        "_HEAP_VS_CHUNK_HEADER", int
+    ):
         return nt.typedVar("_HEAP_VS_CHUNK_HEADER", chunk_address)
 
-    def VS_freed_chunk_header(
-        self, chunk_address: int
-    ) -> nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", int):
+    def VS_freed_chunk_header(self, chunk_address: int) -> nt.typedVar(
+        "_HEAP_VS_CHUNK_FREE_HEADER", int
+    ):
         return nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk_address)
 
     @dataclass
@@ -2355,19 +2319,19 @@ class SegmentHeap(ListEntry, RBTree):
             dprint.print_newline()
         dprint.banner_print("")
 
-    def _HEAP_SEG_CONTEXT(
-        self, segment_address: int
-    ) -> nt.typedVar("_HEAP_SEG_CONTEXT", int):
+    def _HEAP_SEG_CONTEXT(self, segment_address: int) -> nt.typedVar(
+        "_HEAP_SEG_CONTEXT", int
+    ):
         return nt.typedVar("_HEAP_SEG_CONTEXT", segment_address)
 
-    def Seg_SegmentListHead(
-        self, segment_address: int
-    ) -> nt.typedVar("_LIST_ENTRY", int):
+    def Seg_SegmentListHead(self, segment_address: int) -> nt.typedVar(
+        "_LIST_ENTRY", int
+    ):
         return self._HEAP_SEG_CONTEXT(segment_address).SegmentListHead
 
-    def _HEAP_PAGE_SEGMENT(
-        self, segment_address: int
-    ) -> nt.typedVar("_HEAP_PAGE_SEGMENT", int):
+    def _HEAP_PAGE_SEGMENT(self, segment_address: int) -> nt.typedVar(
+        "_HEAP_PAGE_SEGMENT", int
+    ):
         return nt.typedVar("_HEAP_PAGE_SEGMENT", segment_address)
 
     def Seg_PageStart(self, segment_page_address: int, idx: int) -> int:
@@ -2377,9 +2341,9 @@ class SegmentHeap(ListEntry, RBTree):
             else int(segment_page_address + 0x10000)
         )
 
-    def Seg_DescArray(
-        self, segment_address: int, offset: int
-    ) -> nt.typedVar("_HEAP_PAGE_RANGE_DESCRIPTOR", int):
+    def Seg_DescArray(self, segment_address: int, offset: int) -> nt.typedVar(
+        "_HEAP_PAGE_RANGE_DESCRIPTOR", int
+    ):
         return nt.typedVar(
             "_HEAP_PAGE_RANGE_DESCRIPTOR",
             self._HEAP_PAGE_SEGMENT(segment_address).DescArray[offset],
@@ -2390,16 +2354,16 @@ class SegmentHeap(ListEntry, RBTree):
         start = (descarray_address & (~0xFFFFF)) + 0x40
         return (descarray_address - start) // 0x20
 
-    def Seg_FreePageRanges(
-        self, segment_address: int
-    ) -> nt.typedVar("_RTL_RB_TREE", int):
+    def Seg_FreePageRanges(self, segment_address: int) -> nt.typedVar(
+        "_RTL_RB_TREE", int
+    ):
         return nt.typedVar(
             "_RTL_RB_TREE", self._HEAP_SEG_CONTEXT(segment_address).FreePageRanges
         )
 
-    def Seg_FreePageRanges_Root(
-        self, segment_address: int
-    ) -> nt.typedVar("_RTL_BALANCED_NODE", int):
+    def Seg_FreePageRanges_Root(self, segment_address: int) -> nt.typedVar(
+        "_RTL_BALANCED_NODE", int
+    ):
         if self.Seg_FreePageRanges(segment_address).Encoded == 0:
             return nt.typedVar(
                 "_RTL_BALANCED_NODE", self.Seg_FreePageRanges(segment_address).Root
@@ -2469,10 +2433,9 @@ class SegmentHeap(ListEntry, RBTree):
                 dprint.print_newline()
 
                 if chunk_meta.UnitSize == 0:
-
                     dprint.println(
                         colour.red(
-                            f"            UnitSize is 0 or segment is not initialized, can't dump more"
+                            "            UnitSize is 0 or segment is not initialized, can't dump more"
                         ),
                         dml=True,
                     )
@@ -2746,15 +2709,20 @@ utils: Utils = Utils()
 
 stoi: StrToInt = StrToInt()
 
+
 # Rotate left: 0b1001 --> 0b0011
-rol = lambda val, r_bits, max_bits: (val << r_bits % max_bits) & (2**max_bits - 1) | (
-    (val & (2**max_bits - 1)) >> (max_bits - (r_bits % max_bits))
-)
+def rol(val, r_bits, max_bits):
+    return (val << r_bits % max_bits) & (2**max_bits - 1) | (
+        (val & (2**max_bits - 1)) >> (max_bits - (r_bits % max_bits))
+    )
+
 
 # Rotate right: 0b1001 --> 0b1100
-ror = lambda val, r_bits, max_bits: (
-    (val & (2**max_bits - 1)) >> r_bits % max_bits
-) | (val << (max_bits - (r_bits % max_bits)) & (2**max_bits - 1))
+def ror(val, r_bits, max_bits):
+    return ((val & (2**max_bits - 1)) >> r_bits % max_bits) | (
+        val << (max_bits - (r_bits % max_bits)) & (2**max_bits - 1)
+    )
+
 
 if __name__ == "__main__":
     ## register commands
