@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import enum
 import json
 import math
@@ -5,10 +7,10 @@ import os
 import string
 import sys
 import tempfile
-import typing
 from dataclasses import asdict, dataclass
 
 import pykd
+from typing import TypeVar, Generic, Optional, Callable, _GenericAlias, Any, get_args, get_origin
 
 try:
     nt = pykd.module("ntdll")
@@ -73,7 +75,7 @@ class ColourManager:
     def bold_white(self, content):
         return self.bold_colorize(self.WHITE, content)
 
-    def address_color(self, address: int) -> typing.Callable:
+    def address_color(self, address: int) -> Callable:
         if address < 0:
             raise ValueError("Invalid address: address must be positive")
 
@@ -92,7 +94,7 @@ class ColourManager:
         else:
             return self.white
 
-    def colorize_hex_by_address(self, address: any, strsz=-1) -> str:
+    def colorize_hex_by_address(self, address: Any, strsz=-1) -> str:
         if type(address) is not int:
             try:
                 address = int(address)
@@ -101,7 +103,12 @@ class ColourManager:
         target = f"{address:#x}" if strsz == -1 else f"0x{address:0{strsz}x}"
         return self.address_color(address)(target)
 
-    def colorize_string_by_address(self, target: str, address: int) -> str:
+    def colorize_string_by_address(self, target: str, address: Any) -> str:
+        if type(address) is not int:
+            try:
+                address = int(address)
+            except ValueError:
+                raise ValueError("Type can't change to integer")
         return self.address_color(address)(target)
 
 
@@ -300,7 +307,7 @@ class EflagsRegister:
 
 class MemoryAccess:
     def __init__(self):
-        self.addr_symbol: typing.Dict[int, str] = {}
+        self.addr_symbol: Dict[int, str] = {}
 
         self.filename: str = f"{tempfile.gettempdir()}\\{pykd.getProcessSystemID()}.sym"
         if os.path.exists(self.filename):
@@ -323,13 +330,13 @@ class MemoryAccess:
         except:
             pass
 
-    def deref_ptr(self, ptr: int) -> typing.Union[int, None]:
+    def deref_ptr(self, ptr: int) -> Optional[int]:
         try:
             return pykd.loadPtrs(ptr, 1)[0] & ContextManager().ptrmask
         except pykd.MemoryException:
             return None
 
-    def get_addr_from_symbol(self, symbol: str) -> typing.Union[int, None]:
+    def get_addr_from_symbol(self, symbol: str) -> Optional[int]:
         try:
             return int(
                 f"0x{pykd.dbgCommand(f'x {symbol}').split(' ')[0].replace('`', '')}", 16
@@ -337,7 +344,7 @@ class MemoryAccess:
         except pykd.MemoryException:
             return None
 
-    def get_string(self, ptr: int) -> typing.Union[str, None]:
+    def get_string(self, ptr: int) -> Optional[str]:
         try:
             return pykd.loadCStr(ptr)
         except pykd.MemoryException:
@@ -345,37 +352,37 @@ class MemoryAccess:
         except UnicodeDecodeError:
             return None
 
-    def get_int(self, ptr: int) -> typing.Union[int, None]:
+    def get_int(self, ptr: int) -> Optional[int]:
         try:
             return pykd.ptrSignDWord(ptr)
         except pykd.MemoryException:
             return None
 
-    def get_uint(self, ptr: int) -> typing.Union[int, None]:
+    def get_uint(self, ptr: int) -> Optional[int]:
         try:
             return pykd.ptrDWord(ptr)
         except pykd.MemoryException:
             return None
 
-    def get_long(self, ptr: int) -> typing.Union[int, None]:
+    def get_long(self, ptr: int) -> Optional[int]:
         try:
             return pykd.ptrSignQWord(ptr)
         except pykd.MemoryException:
             return None
 
-    def get_ulong(self, ptr: int) -> typing.Union[int, None]:
+    def get_ulong(self, ptr: int) -> Optional[int]:
         try:
             return pykd.ptrQWord(ptr)
         except pykd.MemoryException:
             return None
 
-    def get_bytes(self, ptr: int, size: int) -> typing.Union[bytes, None]:
+    def get_bytes(self, ptr: int, size: int) -> Optional[bytes]:
         try:
             return pykd.loadBytes(ptr, size)
         except pykd.MemoryException:
             return None
 
-    def get_symbol(self, ptr: int) -> typing.Union[str, None]:
+    def get_symbol(self, ptr: int) -> Optional[str]:
         if ptr in self.addr_symbol:
             return self.addr_symbol[ptr]
         try:
@@ -389,8 +396,8 @@ class MemoryAccess:
         except pykd.MemoryException:
             return None
 
-    def get_qword_datas(self, ptr: int, size: int = 0x10) -> typing.List[int]:
-        retlist: typing.List[int] = []
+    def get_qword_datas(self, ptr: int, size: int = 0x10) -> list[int]:
+        retlist: list[int] = []
         for vals in (
             pykd.dbgCommand(f"dq {hex(ptr)} {hex(ptr + size - 1)}")
             .replace("`", "")
@@ -662,11 +669,11 @@ class Vmmap:
 
         return section_info
 
-    def dump_section(self, reload=False) -> typing.List[SectionInfo]:
+    def dump_section(self, reload=False) -> list[SectionInfo]:
         if self.dump_section_info is not None and reload is False:
             return self.dump_section_info
 
-        dumped_info: typing.List[SectionInfo] = []
+        dumped_info: list[SectionInfo] = []
         base: int = 0
 
         while True:
@@ -693,7 +700,7 @@ class Vmmap:
             type_info: str = ""
             path_info: str = ""
 
-            clr: typing.Callable = colour.white
+            clr: Callable = colour.white
 
             if PageState.is_free(section_info.state):
                 clr = colour.gray
@@ -775,7 +782,7 @@ class Vmmap:
 class PrintManager:
     def __init__(self):
         self.banner_size = 160
-        self.query: typing.List[typing.Tuple[str, bool]] = []
+        self.query: list[tuple[str, bool]] = []
 
     def print(self, context, dml=False):
         self.query.append((context, dml))
@@ -793,19 +800,19 @@ class PrintManager:
             pykd.dprint(context, dml)
         self.query = []
 
-    def banner_print(self, banner_name: str, color: typing.Callable = colour.white):
+    def banner_print(self, banner_name: str, color: Callable = colour.white):
         leftlen = self.banner_size - len(banner_name) - 2
         llen = leftlen // 2
         rlen = leftlen - llen
         self.println(color(f"{'-' * llen}{banner_name}{'-' * rlen}"), dml=True)
 
-    def success_print(self, content: str, color: typing.Callable = colour.white):
+    def success_print(self, content: str, color: Callable = colour.white):
         self.println(color(f"[+] {content}"), dml=True)
 
-    def fail_print(self, content: str, color: typing.Callable = colour.white):
+    def fail_print(self, content: str, color: Callable = colour.white):
         self.println(color(f"[-] {content}"), dml=True)
 
-    def trying_print(self, content: str, color: typing.Callable = colour.white):
+    def trying_print(self, content: str, color: Callable = colour.white):
         self.println(color(f"[*] {content}"), dml=True)
 
     def print_newline(self):
@@ -815,14 +822,14 @@ class PrintManager:
 class ContextManager:
     def __init__(self):
         self.arch = pykd.getCPUMode()
-        self.regs: typing.Union[Amd64Register, I386Register]
+        self.regs: Amd64Register | I386Register
         self.segregs: SegmentRegister = SegmentRegister()
         self.eflags: EflagsRegister = EflagsRegister()
         self.ptrmask: int = (
             0xFFFFFFFFFFFFFFFF if self.arch == pykd.CPUType.AMD64 else 0xFFFFFFFF
         )
 
-        self.segments_info: typing.List[SectionInfo] = []
+        self.segments_info: list[SectionInfo] = []
 
         if self.arch == pykd.CPUType.AMD64:
             self.regs = Amd64Register()
@@ -894,7 +901,7 @@ class ContextManager:
                 self.deep_print(memoryaccess.deref_ptr(value), remain - 1, value)
                 return
         elif pykd.isValid(xref):
-            value: typing.Union[str, None] = memoryaccess.get_string(xref)
+            value: Optional[str] = memoryaccess.get_string(xref)
             if value is None:
                 dprint.print_newline()
                 return
@@ -928,7 +935,7 @@ class ContextManager:
                 dprint.print(f"{colour.red(str(EflagsEnum[reg]))} ", dml=True)
         dprint.print_newline()
 
-    def disasm(self, addr) -> typing.Tuple[str, str]:
+    def disasm(self, addr) -> tuple[str, str]:
         resp = pykd.disasm().disasm(addr).split(" ")
         op_str = resp[1]
         asm_str = " ".join(c for c in resp[2::]).strip()
@@ -1047,9 +1054,9 @@ class SearchPattern:
             dml=True,
         )
 
-    def find_int(self, start, end, search_value, inputsize) -> typing.List[int]:
+    def find_int(self, start, end, search_value, inputsize) -> list[int]:
         dumped_pattern: str = ""
-        retlist: typing.List[int] = []
+        retlist: list[int] = []
         search_bytes: str = ""
         for ch in search_value.to_bytes(inputsize, byteorder="little"):
             search_bytes += f" {ch:02x}"
@@ -1067,9 +1074,9 @@ class SearchPattern:
 
         return retlist
 
-    def find_str(self, start, end, search_value) -> typing.List[int]:
+    def find_str(self, start, end, search_value) -> list[int]:
         dumped_pattern: str = ""
-        retlist: typing.List[int] = []
+        retlist: list[int] = []
 
         dumped_pattern = pykd.dbgCommand(
             f's -a {hex(start)} {hex(end)} "{search_value}"'
@@ -1094,7 +1101,7 @@ class SearchPattern:
         level: int = 0,
     ) -> None:
         find_int_mode: bool = False
-        search_value: typing.Union[int, str]
+        search_value: int | str
 
         if pattern.startswith("0x"):
             find_int_mode = True
@@ -1147,7 +1154,7 @@ class SearchPattern:
                 ):
                     continue
 
-                dump_result: typing.List[int] = self.find_int(
+                dump_result: list[int] = self.find_int(
                     section.base_address, section.end_address, search_value, inputsize
                 )
 
@@ -1155,7 +1162,7 @@ class SearchPattern:
                     continue
 
                 for addr in dump_result:
-                    hex_datas: typing.List[int] = memoryaccess.get_qword_datas(addr)
+                    hex_datas: list[int] = memoryaccess.get_qword_datas(addr)
                     if once:
                         once = False
                         info: str = ""
@@ -1237,94 +1244,16 @@ class SearchPattern:
 
             dprint.success_print("Searching pattern finished")
 
-
-class ListEntry:
-    def __init__(self):
-        pass
-
-    def return_check_listentry(self, error: typing.List[str]):
-        return (True if error == [] else False, error)
-
-    def check_listentry(
-        self, listentry: nt.typedVar("_LIST_ENTRY", int)
-    ) -> typing.Tuple[bool, str]:
-        error = []
-
-        if not pykd.isValid(listentry):
-            return (
-                False,
-                f"listentry({colour.colorize_hex_by_address(listentry)}) is Invalid address",
-            )
-
-        if not pykd.isValid(listentry.Flink):
-            error.append(
-                f"listentry.Flink({colour.colorize_hex_by_address(listentry.Flink)}) is Invalid address"
-            )
-        if not pykd.isValid(listentry.Blink):
-            error.append(
-                f"listentry.Blink({colour.colorize_hex_by_address(listentry.Blink)}) is Invalid address"
-            )
-        if error != []:
-            return self.return_check_listentry(error)
-
-        if not pykd.isValid(listentry.Flink.Blink):
-            error.append(
-                f"listentry.Flink.Blink({colour.colorize_hex_by_address(listentry.Flink.Blink)}) is Invalid address"
-            )
-        if not pykd.isValid(listentry.Blink.Flink):
-            error.append(
-                f"listentry.Blink.Flink({colour.colorize_hex_by_address(listentry.Blink.Flink)}) is Invalid address"
-            )
-        if error != []:
-            return self.return_check_listentry(error)
-
-        if listentry.Flink.Blink != listentry:
-            error.append("chunk->Flink->Blink != chunk")
-        if listentry.Blink.Flink != listentry:
-            error.append("chunk->Blink->Flink != chunk")
-        if error != []:
-            return self.return_check_listentry(error)
-
-        if listentry.Flink.Blink.Flink != listentry.Flink:
-            error.append("next_chunk->Blink->Flink != next_chunk")
-
-        return self.return_check_listentry(error)
-
-    def traverse_list_entry(
-        self, list_entry: nt.typedVar("_LIST_ENTRY", int)
-    ) -> typing.Tuple[typing.Tuple[bool, str], typing.List[any]]:
-        curr = list_entry
-        success = True
-        result = []
-        errorstr: str = ""
-
-        while True:
-            if not pykd.isValid(curr):
-                success = False
-                errorstr = f"listentry({colour.colorize_hex_by_address(curr)}) is Invalid address"
-                break
-            if curr in result:
-                if curr != list_entry:
-                    success = False
-                    errorstr = f"listentry({colour.colorize_hex_by_address(curr)}) is already in list"
-                else:
-                    result.append(curr)
-                break
-            result.append(curr)
-            curr = curr.Flink
-        return (success, errorstr), result
-
-
 class RBTree:
     def __init__(self):
         pass
 
-    def return_check_rbtree(self, error: typing.List[str]):
+    def return_check_rbtree(self, error: list[str]):
         return (True if error == [] else False, error)
 
     def check_rbtree(
         self, rbtree: nt.typedVar("_RTL_RB_TREE", int)
-    ) -> typing.Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         error = []
 
         if not pykd.isValid(rbtree):
@@ -1342,7 +1271,7 @@ class RBTree:
 
     def check_rbtree_node(
         self, node: nt.typedVar("_RTL_BALANCED_NODE", int), isroot: bool = False
-    ) -> typing.Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         error = []
 
         if not pykd.isValid(node):
@@ -1374,7 +1303,7 @@ class RBTree:
 
     def rbtree_inorder_traversal(
         self, node: nt.typedVar("_RTL_BALANCED_NODE", int)
-    ) -> typing.List[any]:
+    ) -> list[any]:
         inorder = []
 
         if node == 0:
@@ -1395,7 +1324,7 @@ class RBTree:
 
     def traversal_rbtree(
         self, root: nt.typedVar("_RTL_BALANCED_NODE", int)
-    ) -> typing.List[any]:
+    ) -> list[any]:
         return self.rbtree_inorder_traversal(root)
 
 
@@ -1404,7 +1333,7 @@ class TEB:
         tebaddress: int = self.getTEBAddress()
 
     # https://github.com/corelan/windbglib/blob/d20b3036547886ff6beb616d24927febfa491e93/windbglib.py#L177
-    def getTEBAddress(self) -> typing.Union[int, None]:
+    def getTEBAddress(self) -> Optional[int]:
         try:
             tebinfo = pykd.dbgCommand("!teb")
             tebline = tebinfo.split("\n")[0]
@@ -1418,7 +1347,7 @@ class PEB:
     def __init__(self):
         self.peb = self.getPEBInfo()
 
-    def getPEBAddress(self) -> typing.Union[int, None]:
+    def getPEBAddress(self) -> Optional[int]:
         try:
             pebinfo = pykd.dbgCommand("!peb")
             pebline = pebinfo.split("\n")[0]
@@ -1440,8 +1369,8 @@ class SEHInfo:
 
     def __init__(self, ptr):
         self.Curr: int = ptr
-        self.Next: typing.Union[int, None] = None
-        self.Handler: typing.Union[int, None] = None
+        self.Next: Optional[int] = None
+        self.Handler: Optional[int] = None
         try:
             self.Next = (
                 int(nt.typedVar("_EXCEPTION_REGISTRATION_RECORD", ptr).Next)
@@ -1457,9 +1386,9 @@ class SEHInfo:
 
 class SEH(TEB):
     def __init__(self):
-        self.sehchain: typing.List[SEHInfo] = self.getSEHChain()
+        self.sehchain: list[SEHInfo] = self.getSEHChain()
 
-    def getSEHChain(self) -> typing.List[SEHInfo]:
+    def getSEHChain(self) -> list[SEHInfo]:
         self.sehchain = []
         test = []
 
@@ -1498,7 +1427,7 @@ class SEH(TEB):
             memoryaccess.get_bytes(sehinfo.Curr + 0xC, 4), byteorder="little"
         )
 
-    def except_handler3(self, sehinfo: SEHInfo) -> typing.Tuple[int, int, int]:
+    def except_handler3(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
         EnclosingLevel = int.from_bytes(
             memoryaccess.get_bytes(sehinfo.Curr + 0x8, 4), byteorder="little"
         )
@@ -1510,7 +1439,7 @@ class SEH(TEB):
         )
         return (EnclosingLevel, FilterFunc, HandlerFunc)
 
-    def except_handler4(self, sehinfo: SEHInfo) -> typing.Tuple[int, int, int]:
+    def except_handler4(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
         symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
         security_cookie = int.from_bytes(
             memoryaccess.get_bytes(
@@ -1548,7 +1477,7 @@ class SEH(TEB):
 
     def get_except_handler_info(
         self, sehinfo: SEHInfo
-    ) -> typing.Union[typing.Tuple[int, int, int], None]:
+    ) -> Optional[tuple[int, int, int]]:
         if "_except_handler3" in memoryaccess.get_symbol(sehinfo.Handler):
             return self.except_handler3(sehinfo)
         elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
@@ -1556,7 +1485,7 @@ class SEH(TEB):
         else:
             return None
 
-    def get_esp_and_exc_ptr(self, sehinfo: SEHInfo) -> typing.Tuple[int, int]:
+    def get_esp_and_exc_ptr(self, sehinfo: SEHInfo) -> tuple[int, int]:
         old_esp = int.from_bytes(
             memoryaccess.get_bytes(sehinfo.Curr - 0x8, 4), byteorder="little"
         )
@@ -1613,120 +1542,476 @@ class SEH(TEB):
 
         dprint.banner_print("")
 
+## ================================================================= Heap =================================================================
+T = TypeVar('T')
 
-class NTHeap(ListEntry):
+class Pointer(Generic[T]):
+    def __init__(self, address: int, __orig_class__=None):
+        self.address = int(address)
+        self.__orig_class__ = __orig_class__
+
+    def __int__(self):
+        return self.address or 0
+
+    def __eq__(self, other):
+        if isinstance(other, Pointer):
+            return self.address == other.address
+        elif isinstance(other, int):
+            return self.address == other
+        return False
+    
+    def __xor__(self, other):
+        if isinstance(other, Pointer):
+            return Pointer(self.address ^ other.address, self.__orig_class__)
+        elif isinstance(other, int):
+            return Pointer(self.address ^ other, self.__orig_class__)
+        raise TypeError(f"Unsupported type for XOR: {type(other)}")
+
+    def __repr__(self):
+        return f"Pointer({self.address:#x})" if self.address is not None else "Pointer(None)"
+    
+    @property
+    def T(self):
+        return get_args(self.__orig_class__)[0]
+        
+    @staticmethod
+    def size() -> int:
+        if pykd.getCPUMode() == pykd.CPUType.AMD64:
+            return 8
+        elif pykd.getCPUMode() == pykd.CPUType.I386:
+            return 4
+        else:
+            raise RuntimeError("Unsupported CPU mode")
+
+    def deref(self) -> T:
+        if not pykd.isValid(self.address):
+            raise pykd.MemoryException(f"Invalid pointer dereference: {self.address:#x}")
+
+        if isinstance(self.T, _GenericAlias):
+            return get_origin(self.T)[get_args(self.T)[0]](memoryaccess.deref_ptr(self.address))
+
+        pykdTypedVar = nt.typedVar(self.T.__name__, self.address)
+        if pykdTypedVar is None or not pykd.isValid(pykdTypedVar):
+            return None
+        return self.T(pykdTypedVar)
+    
+class Array(Generic[T]):
+    def __init__(self, address: int, __orig_class__=None):
+        self.address = int(address)
+        self.__orig_class__ = __orig_class__
+
+    def __getitem__(self, index: int) -> T:
+        if isinstance(self.T, _GenericAlias):
+            return get_origin(self.T)[get_args(self.T)[0]](memoryaccess.deref_ptr(self.address + index * self.T.size()))
+        pykdTypedVar = nt.typedVar(self.T.__name__, self.address + index * Pointer.size())
+        if pykdTypedVar is None or not pykd.isValid(pykdTypedVar):
+            return None
+        return self.T(pykdTypedVar)
+
+    @property
+    def T(self):
+        return get_args(self.__orig_class__)[0]
+
+class PkydObject:
+    def __init__(self, address: int = 0):
+        self.address = int(address)
+
+    def __int__(self):
+        return self.address or 0
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.address:#x})" if self.address is not None else f"{self.__class__.__name__}(None)"
+    
+    @classmethod
+    def size(cls) -> int:
+        return nt.sizeof(cls.__name__)
+
+@dataclass
+class _HEAP_SEGMENT(PkydObject):
+    def __init__(self, heap_segment):
+        pass
+
+@dataclass
+class _HEAP_ENTRY(PkydObject):
+    PreviousBlockPrivateData: Pointer[int]
+    Size: int
+    Flags: int
+    SmallTagIndex: int
+    SubSegmentCode: int
+    PreviousSize: int
+    SegmentOffset: int
+    LFHFlags: int
+    UnusedBytes: int
+
+    def __init__(self, heap_entry):
+        super().__init__(int(heap_entry))
+        self.PreviousBlockPrivateData = Pointer[int](
+            heap_entry.PreviousBlockPrivateData, int
+        )
+        self.Size = heap_entry.Size
+        self.Flags = heap_entry.Flags
+        self.SmallTagIndex = heap_entry.SmallTagIndex
+        self.SubSegmentCode = heap_entry.SubSegmentCode
+        self.PreviousSize = heap_entry.PreviousSize
+        self.SegmentOffset = heap_entry.SegmentOffset
+        self.LFHFlags = heap_entry.LFHFlags
+        self.UnusedBytes = heap_entry.UnusedBytes
+    
+    @staticmethod
+    def from_list_entry(list_entry: _LIST_ENTRY) -> _HEAP_ENTRY:
+        return _HEAP_ENTRY(nt.typedVar("_HEAP_ENTRY", int(list_entry) - _HEAP_ENTRY.size()))
+    
+    def decode(self, encoding: _HEAP_ENTRY) -> _HEAP_ENTRY:
+        new_heap_entry = _HEAP_ENTRY(self)
+        new_heap_entry.PreviousBlockPrivateData ^= encoding.PreviousBlockPrivateData
+        new_heap_entry.Size ^= encoding.Size
+        new_heap_entry.Flags ^= encoding.Flags
+        new_heap_entry.SmallTagIndex ^= encoding.SmallTagIndex
+        new_heap_entry.SubSegmentCode ^= encoding.SubSegmentCode
+        new_heap_entry.PreviousSize ^= encoding.PreviousSize
+        new_heap_entry.SegmentOffset ^= encoding.SegmentOffset
+        new_heap_entry.LFHFlags ^= encoding.LFHFlags
+        new_heap_entry.UnusedBytes ^= encoding.UnusedBytes
+
+        return new_heap_entry
+    
+    def get_real_size(self) -> int:
+        if pykd.getCPUMode() == pykd.CPUType.I386:
+            return self.Size << 3
+        elif pykd.getCPUMode() == pykd.CPUType.AMD64:
+            return self.Size << 4
+        
+    @property
+    def expected_smalltagindex(self) -> int:
+        return (self.Size & 0xff) ^ ((self.Flags & 0xff00) >> 8) ^ (self.Flags)
+    
+
+@dataclass
+class _LIST_ENTRY(PkydObject):
+    Flink: Pointer[_LIST_ENTRY]
+    Blink: Pointer[_LIST_ENTRY]
+
+    def __init__(self, list_entry):
+        super().__init__(int(list_entry))
+        self.Flink = Pointer[_LIST_ENTRY](list_entry.Flink, _LIST_ENTRY)
+        self.Blink = Pointer[_LIST_ENTRY](list_entry.Blink, _LIST_ENTRY)
+    
+    def return_check_list_entry(self, error: list[str]):
+        return (True if error == [] else False, error)
+
+    def check_list_entry(self) -> tuple[bool, str]:
+        error = []
+
+        if self.Flink.deref() is None:
+            error.append(
+                f"listentry.Flink({colour.colorize_hex_by_address(self.Flink)}) is Invalid address"
+            )
+        if self.Blink.deref() is None:
+            error.append(
+                f"listentry.Blink({colour.colorize_hex_by_address(self.Blink)}) is Invalid address"
+            )
+        if error != []:
+            return self.return_check_list_entry(error)
+
+        if self.Flink.deref().Blink.deref() is None:
+            error.append(
+                f"listentry.Flink.Blink is Invalid address, {colour.colorize_hex_by_address(self.Flink.deref().Blink)}"
+            )
+        if self.Blink.deref().Flink.deref() is None:
+            error.append(
+                f"listentry.Blink.Flink is Invalid address, {colour.colorize_hex_by_address(self.Blink.deref().Flink)}"
+            )
+        if error != []:
+            return self.return_check_list_entry(error)
+
+        if self.Flink.deref().Blink.deref().Flink != self.Flink:
+            error.append("chunk->Flink->Blink != chunk")
+        if self.Blink.deref().Flink.deref().Blink != self.Blink:
+            error.append("chunk->Blink->Flink != chunk")
+        if error != []:
+            return self.return_check_list_entry(error)
+
+        if self.Flink.deref().Blink.deref().Flink != self.Flink:
+            error.append("next_chunk->Blink->Flink != next_chunk")
+
+        return self.return_check_list_entry(error)
+
+    def traverse_list_entry(self) -> tuple[tuple[bool, str], list[any]]:
+        success = True
+        result = []
+        errorstr: str = ""
+
+        result.append(self)
+
+        curr = self.Flink.deref()
+
+        while curr is not None and curr not in result:
+            result.append(curr)
+            check_result = curr.check_list_entry()
+
+            if not check_result[0]:
+                success = False
+                errorstr += f"Error in list entry {curr}: {check_result[1]}\n"
+            curr = curr.Flink.deref()
+
+        if curr is not None and curr in result:
+            success = False
+            errorstr += f"List entry {curr} is in the list more than once.\n"
+
+        
+        return (success, errorstr), result
+
+@dataclass
+class _HEAP_LIST_LOOKUP(PkydObject):
+    ExtendedLookup: Pointer[_HEAP_LIST_LOOKUP]
+    ArraySize: int
+    ExtraItem: int
+    ItemCount: int
+    OutOfRangeItems: int
+    BaseIndex: int
+    ListHead: Pointer[_LIST_ENTRY]
+    ListsInUseUlong: Pointer[int]
+    ListHints: Array[Pointer[_LIST_ENTRY]]
+
+    def __init__(self, heap_list_lookup):
+        super().__init__(int(heap_list_lookup))
+        self.ExtendedLookup = Pointer[_HEAP_LIST_LOOKUP](
+            heap_list_lookup.ExtendedLookup
+        )
+        self.ArraySize = heap_list_lookup.ArraySize
+        self.ExtraItem = heap_list_lookup.ExtraItem
+        self.ItemCount = heap_list_lookup.ItemCount
+        self.OutOfRangeItems = heap_list_lookup.OutOfRangeItems
+        self.BaseIndex = heap_list_lookup.BaseIndex
+        self.ListHead = Pointer[_LIST_ENTRY](heap_list_lookup.ListHead)
+        self.ListsInUseUlong = Pointer[int](heap_list_lookup.ListsInUseUlong)
+        self.ListHints = Array[Pointer[_LIST_ENTRY]](heap_list_lookup.ListHints)
+
+    @property
+    def size(self) -> int:
+        return nt.sizeof("_HEAP_LIST_LOOKUP")
+    
+@dataclass
+class _SLIST_HEADER(PkydObject):
+    Alignment: int
+    Region: int
+    HeaderX64: int
+
+    def __init__(self, slist_header):
+        super().__init__(int(slist_header))
+        self.Alignment = slist_header.Alignment
+        self.Region = slist_header.Region
+        self.HeaderX64 = slist_header.HeaderX64
+
+@dataclass
+class _INTERLOCK_SEQ(PkydObject):
+    Depth: int
+    Hint: int
+    Lock: int
+    Hint16: int
+    Exchg: int
+
+    def __init__(self, interlock_seq):
+        super().__init__(int(interlock_seq))
+        self.Depth = interlock_seq.Depth
+        self.Hint = interlock_seq.Hint
+        self.Lock = interlock_seq.Lock
+        self.Hint16 = interlock_seq.Hint16
+        self.Exchg = interlock_seq.Exchg
+
+@dataclass
+class _RTL_BITMAP_EX(PkydObject):
+    SizeOfBitMap: int
+    Buffer: Pointer[int]
+
+    def __init__(self, rtl_bitmap_ex):
+        super().__init__(int(rtl_bitmap_ex))
+        self.SizeOfBitMap = rtl_bitmap_ex.SizeOfBitMap
+        self.Buffer = Pointer[int](rtl_bitmap_ex.Buffer)
+    
+@dataclass
+class _HEAP_USERDATA_HEADER(PkydObject):
+    SubSegment: Pointer[_HEAP_SUBSEGMENT]
+    SizeIndexAndPadding: int
+    SizeIndex: int
+    GuardPagePresent: int
+    PaddingBytes: int
+    Signature: int
+    EncodedOffsets: int
+    BusyBitmap: _RTL_BITMAP_EX
+    BitmapData: Array[int]
+
+    def __init__(self, heap_userdata_header):
+        super().__init__(int(heap_userdata_header))
+        self.SubSegment = Pointer[_HEAP_SUBSEGMENT](heap_userdata_header.SubSegment)
+        self.SizeIndexAndPadding = heap_userdata_header.SizeIndexAndPadding
+        self.SizeIndex = heap_userdata_header.SizeIndex
+        self.GuardPagePresent = heap_userdata_header.GuardPagePresent
+        self.PaddingBytes = heap_userdata_header.PaddingBytes
+        self.Signature = heap_userdata_header.Signature
+        self.EncodedOffsets = heap_userdata_header.EncodedOffsets
+        self.BusyBitmap = _RTL_BITMAP_EX(heap_userdata_header.BusyBitmap)
+        self.BitmapData = Array[int](heap_userdata_header.BitmapData)
+    
+@dataclass
+class _HEAP_LOCAL_DATA(PkydObject):
+    def __init__(self, heap_local_data):
+        super().__init__(int(heap_local_data))
+        # Assuming heap_local_data has no fields for now, can be extended later
+        pass
+
+@dataclass
+class _HEAP_SUBSEGMENT(PkydObject):
+    LocalInfo: Pointer[_HEAP_LOCAL_SEGMENT_INFO]
+    UserBlocks: Pointer[_HEAP_USERDATA_HEADER]
+    DelayFreeList: Pointer[_SLIST_HEADER]
+    AggregateExchg: _INTERLOCK_SEQ
+    BlockSize: int
+    Flags: int
+    BlockCount: int
+    SizeIndex: int
+
+    def __init__(self, heap_subsegment):
+        super().__init__(int(heap_subsegment))
+        self.LocalInfo = Pointer[_HEAP_LOCAL_SEGMENT_INFO](heap_subsegment.LocalInfo)
+        self.UserBlocks = Pointer[_HEAP_USERDATA_HEADER](heap_subsegment.UserBlocks)
+        self.DelayFreeList = Pointer[_SLIST_HEADER](heap_subsegment.DelayFreeList)
+        self.AggregateExchg = _INTERLOCK_SEQ(heap_subsegment.AggregateExchg)
+        self.BlockSize = heap_subsegment.BlockSize
+        self.Flags = heap_subsegment.Flags
+        self.BlockCount = heap_subsegment.BlockCount
+        self.SizeIndex = heap_subsegment.SizeIndex
+
+@dataclass
+class _HEAP_BUCKET(PkydObject):
+    BlockUnits: int
+    SizeIndex: int
+    UseAffinity: int
+    Flags: int
+
+    def __init__(self, heap_bucket):
+        super().__init__(int(heap_bucket))
+        self.BlockUnits = heap_bucket.BlockUnits
+        self.SizeIndex = heap_bucket.SizeIndex
+        self.UseAffinity = heap_bucket.UseAffinity
+        self.Flags = heap_bucket.Flags
+    
+    def get_real_size(self) -> int:
+        if pykd.getCPUMode() == pykd.CPUType.I386:
+            return self.BlockUnits << 3
+        elif pykd.getCPUMode() == pykd.CPUType.AMD64:
+            return self.BlockUnits << 4
+        else:
+            raise RuntimeError("Unsupported CPU mode")
+
+@dataclass
+class _HEAP_LOCAL_SEGMENT_INFO(PkydObject):
+    LocalData: Pointer[_HEAP_LOCAL_DATA]
+    ActiveSubsegment: Pointer[_HEAP_SUBSEGMENT]
+    CachedItems: Array[Pointer[_HEAP_SUBSEGMENT]]
+    SListHeader: Pointer[_SLIST_HEADER]
+    BucketIndex: int
+
+    def __init__(self, heap_local_segment_info):
+        super().__init__(int(heap_local_segment_info))
+        print(heap_local_segment_info)
+        self.LocalData = Pointer[_HEAP_LOCAL_DATA](heap_local_segment_info.LocalData)
+        self.ActiveSubsegment = Pointer[_HEAP_SUBSEGMENT](
+            heap_local_segment_info.ActiveSubsegment
+        )
+        self.CachedItems = Array[Pointer[_HEAP_SUBSEGMENT]](
+            heap_local_segment_info.CachedItems
+        )
+        self.SListHeader = Pointer[_SLIST_HEADER](heap_local_segment_info.SListHeader)
+        self.BucketIndex = heap_local_segment_info.BucketIndex
+
+@dataclass
+class _LFH_HEAP(PkydObject):
+    SubSegmentZones: Pointer[_LIST_ENTRY]
+    Heap: Pointer[_HEAP]
+    Buckets: Array[_HEAP_BUCKET]
+    SegmentInfoArrays: Array[Pointer[_HEAP_LOCAL_SEGMENT_INFO]]
+
+    def __init__(self, lfh_heap):
+        super().__init__(int(lfh_heap))
+        self.SubSegmentZones = Pointer[_LIST_ENTRY](lfh_heap.SubSegmentZones)
+        self.Heap = Pointer[_HEAP](lfh_heap.Heap)
+        self.Buckets = Array[_HEAP_BUCKET](lfh_heap.Buckets)
+        self.SegmentInfoArrays = Array[Pointer[_HEAP_LOCAL_SEGMENT_INFO]](
+            lfh_heap.SegmentInfoArrays
+        )
+
+@dataclass
+class _HEAP(PkydObject):
+    Segment: _HEAP_SEGMENT
+    SegmentSignature: int
+    Encoding: _HEAP_ENTRY
+    BlocksIndex: Pointer[_HEAP_LIST_LOOKUP]
+    FreeLists: _LIST_ENTRY
+    FrontEndHeap: Pointer[_LFH_HEAP]
+
+    def __init__(self, heap):
+        super().__init__(int(heap))
+        self.Segment = _HEAP_SEGMENT(heap.Segment)
+        self.SegmentSignature = heap.SegmentSignature
+        self.Encoding = _HEAP_ENTRY(heap.Encoding)
+        self.BlocksIndex = Pointer[_HEAP_LIST_LOOKUP](heap.BlocksIndex)
+        self.FreeLists = _LIST_ENTRY(heap.FreeLists)
+        self.FrontEndHeap = Pointer[_LFH_HEAP](heap.FrontEndHeap)
+    
+class NTHeap():
     def __init__(self):
         pass
 
-    def _HEAPInfo(self, heap_address: int) -> nt.typedVar("_HEAP", int):
-        return nt.typedVar("_HEAP", heap_address)
+    def _HEAP(self, heap_address: int) -> _HEAP:
+        return _HEAP(nt.typedVar("_HEAP", heap_address))
 
-    def get_freelist(self, heap_address: int) -> typing.List[int]:
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        return self.traverse_list_entry(heap.FreeLists)[1]
-
-    def get_freelist_in_blocksindex(self, blockindex_address: int) -> typing.List[int]:
-        freelist: typing.List[int] = []
-        blockindex = nt.typedVar("_HEAP_LIST_LOOKUP", blockindex_address)
-        if blockindex == 0:
+    def get_freelist_in_blocksindex(self, BlocksIndex: _HEAP_LIST_LOOKUP) -> list[_LIST_ENTRY]:
+        if BlocksIndex == 0:
             return []
-        return self.traverse_list_entry(blockindex.ListHead)[1]
+        return BlocksIndex.ListHead.deref().traverse_list_entry()[1]
 
-    def get_blockindex_list(self, heap_address: int):
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        blockindex_list = []
-        current_blockindex = nt.typedVar("_HEAP_LIST_LOOKUP", int(heap.BlocksIndex))
-        while True:
-            blockindex_list.append(current_blockindex)
-            if not pykd.isValid(current_blockindex):
+    def get_blocksindexs(self, heap_address: int) -> list[_HEAP_LIST_LOOKUP]:
+        heap = self._HEAP(heap_address)
+        BlocksIndexs = []
+        BlocksIndex = heap.BlocksIndex.deref()
+        while BlocksIndex is not None and BlocksIndex != 0:
+            BlocksIndexs.append(BlocksIndex)
+            if BlocksIndex.ExtendedLookup == 0:
                 break
-            elif current_blockindex == 0:
-                break
-            current_blockindex = nt.typedVar(
-                "_HEAP_LIST_LOOKUP", int(current_blockindex.ExtendedLookup)
-            )
-
-        return blockindex_list
+            BlocksIndex = BlocksIndex.ExtendedLookup.deref()
+        return BlocksIndexs
 
     def get_listhint(
         self, heap_address: int
-    ) -> typing.List[typing.List[typing.Tuple[bool, int]]]:
-        blockindex_list: typing.List[nt.typedVar("_HEAP_LIST_LOOKUP")] = (
-            self.get_blockindex_list(heap_address)
-        )
-        listhint_list: typing.List[typing.List[typing.Tuple[bool, int]]] = []
+    ) -> list[list[tuple[bool, Pointer[_LIST_ENTRY]]]]:
+        listhint_list: list[list[tuple[bool, Pointer[_LIST_ENTRY]]]] = []
 
-        for blockindex in blockindex_list:
-            if int(blockindex) == 0:
-                listhint_list.append([])
+        for BlocksIndex in self.get_blocksindexs(heap_address):
+            if BlocksIndex is None or BlocksIndex == 0:
                 continue
-            tempbitlist: typing.List[int] = memoryaccess.get_qword_datas(
-                blockindex.ListsInUseUlong,
-                math.floor(blockindex.ArraySize / (0x8 * 0x8)),
+            
+            bitlist: list[int] = memoryaccess.get_qword_datas(
+                int(BlocksIndex.ListsInUseUlong),
+                math.floor(BlocksIndex.ArraySize / (0x8 * 0x8)),
             )
             bitmap: int = 0
-            for i, bitnum in enumerate(tempbitlist):
+            for i, bitnum in enumerate(bitlist):
                 bitmap |= bitnum << (i * 64)
 
-            listhint: typing.List[int] = []
+            listhint: list[int] = []
 
-            for i in range(blockindex.ArraySize):
+            for i in range(BlocksIndex.ArraySize):
                 listhint.append(
-                    (True if (bitmap >> i) & 1 else False, int(blockindex.ListHints[i]))
+                    (True if (bitmap >> i) & 1 else False, BlocksIndex.ListHints[i])
                 )
             listhint_list.append(listhint)
 
         return listhint_list
 
-    def get_frontendheap(self, heap_address: int) -> nt.typedVar("_LFH_HEAP", int):
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        return nt.typedVar("_LFH_HEAP", int(heap.FrontEndHeap))
-
-    def get_buckets_ptr(self, heap_address: int) -> typing.List[int]:
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
-        buckets: typing.List[nt.typedVar("_HEAP_BUCKET", int)] = []
-
-        for i in range(0, 128 + 1):
-            buckets.append(nt.typedVar("_HEAP_BUCKET", int(lfh_heap.Buckets[i])))
-
-        return buckets
-
-    def get_segmentinfoarray_ptr(self, heap_address: int) -> typing.List[int]:
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
-
-        if int(lfh_heap) == 0:
-            return []
-
-        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int)] = []
-
-        for i in range(0, 128 + 1):
-            segmentinfoarray.append(
-                nt.typedVar(
-                    "_HEAP_LOCAL_SEGMENT_INFO", int(lfh_heap.SegmentInfoArrays[i])
-                )
-            )
-
-        return segmentinfoarray
-
-    def get_cacheditems(self, segmentinfo_address: int) -> typing.List[int]:
-        segmentinfo: nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int) = nt.typedVar(
-            "_HEAP_LOCAL_SEGMENT_INFO", segmentinfo_address
-        )
-        cacheditems: typing.List[int] = []
-
-        for i in range(0, 16):
-            cacheditems.append(int(segmentinfo.CachedItems[i]))
-
-        return cacheditems
-
     def get_chunk_size(
-        self, chunk_ptr: int, heap_address: int = 0, encoding: bool = True
+        self, heap: _HEAP, chunk: _HEAP_ENTRY, encoding: bool = True
     ) -> int:
-        heap = self._HEAPInfo(heap_address)
-        chunk = nt.typedVar("_HEAP_ENTRY", chunk_ptr)
-
         target = chunk.Size
         if encoding:
             target ^= heap.Encoding.Size
@@ -1737,7 +2022,7 @@ class NTHeap(ListEntry):
         else:
             raise RuntimeError("Unsupported CPU mode")
 
-    def is_valid_smalltagindex(self, chunk, encoding) -> int:
+    def is_valid_smalltagindex(self, chunk: _HEAP_ENTRY, encoding: _HEAP_ENTRY) -> int:
         # if context.arch == pykd.CPUType.I386:
         checker: int = 0
         for ch in (int(chunk.Size) ^ int(encoding.Size)).to_bytes(
@@ -1755,25 +2040,21 @@ class NTHeap(ListEntry):
         return checker
 
     def print_freelist(self, heap_address: int) -> None:
-        heap = self._HEAPInfo(heap_address)
-        listhint_list: typing.List[typing.List[typing.Tuple[bool, int]]] = (
-            self.get_listhint(heap_address)
-        )
-        blockindex_list: typing.List[nt.typedVar("_HEAP_LIST_LOOKUP", int)] = (
-            self.get_blockindex_list(heap_address)
-        )
+        heap = self._HEAP(heap_address)
+        listhint_list = self.get_listhint(heap_address)
+        blocksindex_list: list[_HEAP_LIST_LOOKUP] = self.get_blocksindexs(heap_address)
 
-        notlfh_idxs: typing.List[int] = []
+        notlfh_idxs: list[int] = []
 
-        for i, blockindex in enumerate(blockindex_list):
-            if blockindex.BaseIndex == 0x0:
+        for i, blocksindex in enumerate(blocksindex_list):
+            if blocksindex.BaseIndex == 0x0:
                 notlfh_idxs.append(i)
 
         for t, listhint in enumerate(listhint_list):
             if t not in notlfh_idxs:
                 continue
 
-            freelist = self.get_freelist_in_blocksindex(blockindex_list[t])
+            freelist = self.get_freelist_in_blocksindex(blocksindex_list[t])
 
             if freelist == []:
                 dprint.banner_print(" [-] Heap freelist is empty ")
@@ -1783,25 +2064,16 @@ class NTHeap(ListEntry):
             dprint.banner_print(
                 f" [+] Heap freelist scan ({heap_address:#x}) at blocksindex {t} "
             )
-            for i, addr in enumerate(freelist):
-                linked_list = nt.typedVar("_LIST_ENTRY", addr)
-                linked_list_addr = addr
+            for i, linked_list in enumerate(freelist):
+                chunk = _HEAP_ENTRY.from_list_entry(linked_list).decode(heap.Encoding)
 
-                addr -= nt.sizeof("_HEAP_ENTRY")
-                chunk = nt.typedVar("_HEAP_ENTRY", addr)
-                encoding = heap.Encoding
-
-                chunk_idx = chunk.Size ^ encoding.Size
-                real_chunk_size = self.get_chunk_size(addr, heap_address)
-                real_chunk_prevsize = self.get_chunk_size(addr, heap_address)
-
-                if not pykd.isValid(linked_list):
-                    dprint.print(colour.red(f"0x{addr:08x} "), dml=True)
+                if not pykd.isValid(int(linked_list)):
+                    dprint.print(colour.red(f"0x{int(chunk):08x} "), dml=True)
                     dprint.println(colour.white("| <invalid address> |"), dml=True)
                 else:
                     dprint.print(
                         colour.white(
-                            f"{colour.colorize_string_by_address(f'0x{addr:08x}', addr)} | Flink: {colour.colorize_string_by_address(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_string_by_address(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"
+                            f"{colour.colorize_string_by_address(f'0x{int(chunk):08x}', chunk)} | Flink: {colour.colorize_string_by_address(f'0x{int(linked_list.Flink):08x}', linked_list.Flink)} / Blink: {colour.colorize_string_by_address(f'0x{int(linked_list.Blink):08x}', linked_list.Blink)} |"
                         ),
                         dml=True,
                     )
@@ -1812,34 +2084,33 @@ class NTHeap(ListEntry):
                     else:
                         dprint.print(
                             colour.white(
-                                f" Size: {colour.blue(f'0x{real_chunk_size:04x}')} , PrevSize: 0x{real_chunk_prevsize:04x}"
+                                f" Size: {colour.blue(f'0x{chunk.get_real_size():04x}')} , PrevSize: 0x{chunk.get_real_size():04x}"
                             ),
                             dml=True,
                         )
 
-                        if chunk_idx >= len(listhint):
+                        if chunk.Size >= len(listhint):
                             dprint.print(colour.white(" (out of list hint)"), dml=True)
-                        elif listhint[chunk_idx] == (True, linked_list_addr):
+                        elif listhint[chunk.Size] == (True, int(linked_list)):
                             dprint.print(
-                                colour.white(f" (list hint at [{chunk_idx:#x}])"),
+                                colour.white(f" (list hint at [{chunk.Size:#x}])"),
                                 dml=True,
                             )
                         elif (
-                            listhint[chunk_idx][0] == True
-                            and listhint[chunk_idx][1] != linked_list_addr
+                            listhint[chunk.Size][0] == True
+                            and listhint[chunk.Size][1].deref() != int(linked_list)
                         ):
                             dprint.print(
                                 colour.red(
-                                    f" (expect 0x{linked_list_addr:08x} but 0x{listhint[chunk_idx][1]:08x}, based on list hint)"
+                                    f" (expect 0x{int(linked_list):08x} but 0x{int(listhint[chunk.Size][1].deref()):08x}, based on list hint)"
                                 ),
                                 dml=True,
                             )
 
-                        checker = self.is_valid_smalltagindex(chunk, encoding)
-                        if checker != 0:
+                        if chunk.SmallTagIndex != chunk.expected_smalltagindex:
                             dprint.print(
                                 colour.red(
-                                    f" (encoding error, 0x0 != 0x{checker:02x})"
+                                    f" (encoding error, {chunk.SmallTagIndex:#x} != {chunk.expected_smalltagindex:#x})"
                                 ),
                                 dml=True,
                             )
@@ -1847,7 +2118,7 @@ class NTHeap(ListEntry):
                     dprint.print_newline()
 
                 if i != len(freelist) - 1:
-                    sanity_result = self.check_listentry(linked_list)
+                    sanity_result = linked_list.check_list_entry()
                     if sanity_result[0]:
                         dprint.println("     ↕️")
                     else:
@@ -1858,88 +2129,57 @@ class NTHeap(ListEntry):
             dprint.banner_print("")
 
     def print_lfh(self, heap_address: int) -> None:
-        heap: nt.typedVar("_HEAP", heap_address) = self._HEAPInfo(heap_address)
-        lfh_heap: nt.typedVar("_LFH_HEAP", int) = self.get_frontendheap(heap_address)
-        buckets: typing.List[nt.typedVar("_HEAP_BUCKET", int)] = self.get_buckets_ptr(
-            heap_address
-        )
-        segmentinfoarray: typing.List[nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int)] = (
-            self.get_segmentinfoarray_ptr(heap_address)
-        )
+        heap = self._HEAP(heap_address)
+        lfh_heap = heap.FrontEndHeap.deref()
 
-        if segmentinfoarray == []:
+        if lfh_heap.Buckets.address == 0:
             dprint.banner_print(" [-] LFH Heap is not enabled ")
             return
 
         dprint.banner_print(f" [+] LFH Heap ({heap_address:#x}) at frontend heap ")
-        for i, lfh_info in enumerate(zip(buckets, segmentinfoarray)):
-            bucket, segmentptr = lfh_info
-
-            try:
-                segmentinfo: nt.typedVar("_HEAP_LOCAL_SEGMENT_INFO", int) = nt.typedVar(
-                    "_HEAP_LOCAL_SEGMENT_INFO", segmentptr
-                )
-                active_subseg: nt.typedVar("_HEAP_SUBSEGMENT", int) = nt.typedVar(
-                    "_HEAP_SUBSEGMENT", int(segmentinfo.ActiveSubsegment)
-                )
-                user_block: nt.typedVar("_HEAP_USERDATA_HEADER", int) = nt.typedVar(
-                    "_HEAP_USERDATA_HEADER", int(active_subseg.UserBlocks)
-                )
-                aggregate_exchg: nt.typedVar("_INTERLOCK_SEQ", int) = nt.typedVar(
-                    "_INTERLOCK_SEQ", int(active_subseg.AggregateExchg)
-                )
-            except pykd.MemoryException:
+        for i in range(129):
+            if int(lfh_heap.SegmentInfoArrays[i]) == 0:
                 continue
+            bucket, segment_info = lfh_heap.Buckets[i], lfh_heap.SegmentInfoArrays[i].deref()
+            block_unit, active_subsegment = bucket.BlockUnits, segment_info.ActiveSubsegment.deref()
+            userdata = active_subsegment.UserBlocks.deref()
 
-            chunk_size: int = 0
-            if context.arch == pykd.CPUType.I386:
-                chunk_size = active_subseg.BlockSize << 3
-            elif context.arch == pykd.CPUType.AMD64:
-                chunk_size = active_subseg.BlockSize << 4
-            else:
-                raise RuntimeError("Unsupported CPU mode")
-
-            heap_entry_start: int = (
-                int(user_block) + nt.sizeof("_HEAP_USERDATA_HEADER") + 0x8
-            )
-
-            if aggregate_exchg.Depth == 0:
+            if active_subsegment.AggregateExchg.Depth == 0:
                 dprint.println(
                     colour.white(
-                        f"segment {i:#x} is full ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"
+                        f"segment {i:#x} is full ({colour.colorize_hex_by_address(userdata)}, size: {colour.blue(f'{bucket.get_real_size():#x}')})"
                     ),
                     dml=True,
                 )
                 dprint.println(
-                    f"heap entry start: {colour.colorize_hex_by_address(heap_entry_start)}"
+                    f"heap entry start: {colour.colorize_hex_by_address(int(userdata))}",
                 )
             else:
                 dprint.println(
                     colour.white(
-                        f"segment {i:#x} is not full, {int(aggregate_exchg.Depth):#x} ({colour.colorize_hex_by_address(user_block)}, size: {colour.blue(f'{chunk_size:#x}')})"
+                        f"segment {i:#x} is not full, {int(active_subsegment.AggregateExchg.Depth):#x} ({colour.colorize_hex_by_address(int(userdata))}, size: {colour.blue(f'{bucket.get_real_size():#x}')})"
                     ),
                     dml=True,
                 )
                 dprint.println(
-                    f"heap entry start: {colour.colorize_hex_by_address(heap_entry_start)}",
+                    f"heap entry start: {colour.colorize_hex_by_address(userdata)}",
                     dml=True,
                 )
                 dprint.print("busybitmap: ")
-                busybitmap: nt.typedVar("_RTL_BITMAP", int) = nt.typedVar(
-                    "_RTL_BITMAP", int(user_block.BusyBitmap)
-                )
-                bitvalue: int = memoryaccess.get_qword_datas(int(busybitmap.Buffer), 1)[
+                bitvalue: int = memoryaccess.get_qword_datas(int(userdata.BusyBitmap.Buffer), 1)[
                     0
                 ]
-                for j in range(int(busybitmap.SizeOfBitMap)):
+                for j in range(int(userdata.BusyBitmap.SizeOfBitMap)):
                     if (bitvalue >> j) & 1 == 0:
                         dprint.print(colour.red(0), dml=True)
                     else:
                         dprint.print(colour.green(1), dml=True)
                 dprint.print_newline()
 
-            cacheditems: typing.List[int] = self.get_cacheditems(segmentptr)
-            for j, cacheditem in enumerate(cacheditems):
+            for i in range(16):
+                if segment_info.CachedItems[i] == 0:
+                    continue
+                cacheditem = segment_info.CachedItems[i].deref()
                 if cacheditem != 0:
                     try:
                         dprint.println(
@@ -1960,7 +2200,7 @@ class NTHeap(ListEntry):
         dprint.banner_print("")
 
 
-class SegmentHeap(ListEntry, RBTree):
+class SegmentHeap(RBTree):
     def __init__(self):
         self._RTLP_HP_HEAP_GLOBALS = nt.typedVar(
             "_RTLP_HP_HEAP_GLOBALS",
@@ -1992,11 +2232,11 @@ class SegmentHeap(ListEntry, RBTree):
     ):
         return self.LFHContext(heap_address).Callbacks
 
-    def LFH_Buckets(self, heap_address: int) -> typing.List[any]:
+    def LFH_Buckets(self, heap_address: int) -> list[any]:
         lfhcontext: nt.typedVar("_HEAP_LFH_CONTEXT", int) = self.LFHContext(
             heap_address
         )
-        buckets: typing.List[nt.typedVar("_HEAP_LFH_BUCKET", int)] = []
+        buckets: list[nt.typedVar("_HEAP_LFH_BUCKET", int)] = []
 
         for i in range(0, self.buckets_cnt):
             buckets.append(nt.typedVar("_HEAP_LFH_BUCKET", lfhcontext.Buckets[i]))
@@ -2049,15 +2289,15 @@ class SegmentHeap(ListEntry, RBTree):
     ) -> int:
         return int(self.Bucket_AffinitySlot(bucket, idx).State.AvailableSubsegmentCount)
 
-    def Bucket_Affinity_AvailableSubsegmentList(
+    def Bucket_Affinity_AvailableSubsegmentlist(
         self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), idx: int = 0
     ) -> nt.typedVar("_LIST_ENTRY", int):
-        return self.Bucket_AffinitySlot(bucket, idx).State.AvailableSubsegmentList
+        return self.Bucket_AffinitySlot(bucket, idx).State.AvailableSubsegmentlist
 
-    def Bucket_Affinity_FullSubsegmentList(
+    def Bucket_Affinity_FullSubsegmentlist(
         self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), idx: int = 0
     ) -> nt.typedVar("_LIST_ENTRY", int):
-        return self.Bucket_AffinitySlot(bucket, idx).State.FullSubsegmentList
+        return self.Bucket_AffinitySlot(bucket, idx).State.FullSubsegmentlist
 
     def _HEAP_LFH_SUBSEGMENT(self, subsegment_address: int) -> nt.typedVar(
         "_HEAP_LFH_SUBSEGMENT", int
@@ -2101,10 +2341,10 @@ class SegmentHeap(ListEntry, RBTree):
                 dml=True,
             )
             dprint.print(
-                f"    Flink: {colour.colorize_hex_by_address(int(subsegment.ListEntry.Flink))}, Blink: {colour.colorize_hex_by_address(int(subsegment.ListEntry.Blink))}",
+                f"    Flink: {colour.colorize_hex_by_address(int(subsegment.listEntry.Flink))}, Blink: {colour.colorize_hex_by_address(int(subsegment.listEntry.Blink))}",
                 dml=True,
             )
-            sanity_result = self.check_listentry(subsegment.ListEntry)
+            sanity_result = self.check_listentry(subsegment.listEntry)
             if sanity_result[0]:
                 pass
             else:
@@ -2159,8 +2399,8 @@ class SegmentHeap(ListEntry, RBTree):
 
         once = True
         already_visited = []
-        curr = self.Bucket_Affinity_AvailableSubsegmentList(bucket).Flink
-        while curr != self.Bucket_Affinity_AvailableSubsegmentList(bucket):
+        curr = self.Bucket_Affinity_AvailableSubsegmentlist(bucket).Flink
+        while curr != self.Bucket_Affinity_AvailableSubsegmentlist(bucket):
             if not pykd.isValid(curr):
                 dprint.print("    Subsegment: ")
                 dprint.println(
@@ -2177,8 +2417,8 @@ class SegmentHeap(ListEntry, RBTree):
             once = print_lfh_subsegment(self, curr, size, once)
             curr = curr.Flink
 
-        curr = self.Bucket_Affinity_FullSubsegmentList(bucket).Flink
-        while curr != self.Bucket_Affinity_FullSubsegmentList(bucket):
+        curr = self.Bucket_Affinity_FullSubsegmentlist(bucket).Flink
+        while curr != self.Bucket_Affinity_FullSubsegmentlist(bucket):
             if not pykd.isValid(curr):
                 dprint.print("    Subsegment: ")
                 dprint.println(
@@ -2220,7 +2460,7 @@ class SegmentHeap(ListEntry, RBTree):
                 bucket, 0
             ):
                 self.print_bucket(bucket, size, False)
-            if pykd.isValid(bucket) and self.Bucket_Affinity_FullSubsegmentList(
+            if pykd.isValid(bucket) and self.Bucket_Affinity_FullSubsegmentlist(
                 bucket, 0
             ):
                 avaliable_segments_idx.append(self.BucketIndex(bucket))
@@ -2375,7 +2615,7 @@ class SegmentHeap(ListEntry, RBTree):
                 ^ int(self.Seg_FreePageRanges(segment_address)),
             )
 
-    def Seg_FreePageRanges_Inorder(self, segment_address: int) -> typing.List[any]:
+    def Seg_FreePageRanges_Inorder(self, segment_address: int) -> list[any]:
         return self.traversal_rbtree(self.Seg_FreePageRanges_Root(segment_address))
 
     def _HEAP_PAGE_RANGE_DESCRIPTOR(
@@ -2494,7 +2734,7 @@ class SegmentHeap(ListEntry, RBTree):
 
 class Heap(PEB):
     def __init__(self):
-        self.heaps: typing.List[int] = self.get_heaps_address()
+        self.heaps: list[int] = self.get_heaps_address()
         self.NtHeap: NTHeap = NTHeap()
         self.SegmentHeap: SegmentHeap = SegmentHeap()
         pass
@@ -2571,7 +2811,7 @@ class Heap(PEB):
             elif chunk_info["status"] == "Backend":
                 self.SegmentHeap.print_block(int(info_dict["Heap Address"], 16))
 
-    def get_heaps_address(self) -> typing.List[int]:
+    def get_heaps_address(self) -> list[int]:
         peb = self.getPEBInfo()
         self.heaps = []
 
