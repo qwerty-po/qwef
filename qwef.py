@@ -1252,8 +1252,28 @@ class SearchPattern:
             dprint.success_print("Searching pattern finished")
 
 ## ================================================================ Types =================================================================
-T = TypeVar('T')
+class Bit(int):
+    def __new__(cls, value: int):
+        if not isinstance(value, int):
+            raise TypeError("Value must be an integer")
+        if value < 0 or value > 1:
+            raise ValueError("Value must be either 0 or 1")
+        return super().__new__(cls, value)
 
+class uint16_t(int):
+    def __new__(cls, value: int):
+        if not isinstance(value, int):
+            raise TypeError("Value must be an integer")
+        if value < 0 or value > 0xFFFF:
+            raise ValueError("Value must be in the range [0, 65535]")
+        return super().__new__(cls, value)
+    
+    @staticmethod
+    def size() -> int:
+        return 2
+
+T = TypeVar('T')
+    
 class Pointer(Generic[T]):
     def __init__(self, address: int, __orig_class__=None):
         self.address = int(address)
@@ -1298,6 +1318,10 @@ class Pointer(Generic[T]):
 
         if isinstance(self.T, _GenericAlias):
             return get_origin(self.T)[get_args(self.T)[0]](memoryaccess.deref_ptr(self.address))
+        elif self.T == Bit:
+            return Bit(memoryaccess.deref_ptr(self.address) & 0x1)
+        elif self.T.__name__.startswith("uint") and self.T.__name__.endswith("_t"):
+            return uint16_t(memoryaccess.deref_ptr(self.address) & 0xFFFF)
 
         pykdTypedVar = nt.typedVar(self.T.__name__, self.address)
         if pykdTypedVar is None or not pykd.isValid(pykdTypedVar):
@@ -1312,6 +1336,10 @@ class Array(Generic[T]):
     def __getitem__(self, index: int) -> T:
         if isinstance(self.T, _GenericAlias):
             return get_origin(self.T)[get_args(self.T)[0]](memoryaccess.deref_ptr(self.address + index * self.T.size()))
+        elif self.T == Bit:
+            return Bit(memoryaccess.deref_ptr(self.address + index * self.T.size()) & 0x1)
+        elif self.T.__name__.startswith("uint") and self.T.__name__.endswith("_t"):
+            return uint16_t(memoryaccess.deref_ptr(self.address + index * self.T.size()) & 0xFFFF)
         pykdTypedVar = nt.typedVar(self.T.__name__, self.address + index * self.T.size())
         if pykdTypedVar is None or not pykd.isValid(pykdTypedVar):
             return None
@@ -1804,7 +1832,7 @@ class _HEAP_USERDATA_HEADER(PykdObject):
     Signature: int
     EncodedOffsets: int
     BusyBitmap: _RTL_BITMAP_EX
-    BitmapData: Array[int]
+    BitmapData: Array[Bool]
 
     def __init__(self, heap_userdata_header):
         super().__init__(int(heap_userdata_header))
@@ -1816,7 +1844,7 @@ class _HEAP_USERDATA_HEADER(PykdObject):
         self.Signature = heap_userdata_header.Signature
         self.EncodedOffsets = heap_userdata_header.EncodedOffsets
         self.BusyBitmap = _RTL_BITMAP_EX(heap_userdata_header.BusyBitmap)
-        self.BitmapData = Array[int](heap_userdata_header.BitmapData)
+        self.BitmapData = Array[Bool](heap_userdata_header.BitmapData)
     
 @dataclass
 class _HEAP_LOCAL_DATA(PykdObject):
@@ -1879,7 +1907,6 @@ class _HEAP_LOCAL_SEGMENT_INFO(PykdObject):
 
     def __init__(self, heap_local_segment_info):
         super().__init__(int(heap_local_segment_info))
-        print(heap_local_segment_info)
         self.LocalData = Pointer[_HEAP_LOCAL_DATA](heap_local_segment_info.LocalData)
         self.ActiveSubsegment = Pointer[_HEAP_SUBSEGMENT](
             heap_local_segment_info.ActiveSubsegment
@@ -2339,82 +2366,363 @@ class _HEAP_SEG_CONTEXT(PykdObject):
                 continue
             segments.append(segment)
         return segments
+    
+@dataclass
+class _SINGLE_LIST_ENTRY(PykdObject):
+    Next: Pointer[_SINGLE_LIST_ENTRY]
+
+    def __init__(self, single_list_entry):
+        super().__init__(int(single_list_entry))
+        self.Next = Pointer[_SINGLE_LIST_ENTRY](single_list_entry.Next)
+    
+    def traverse_single_list_entry(self, include_head: bool = True) -> list[Pointer[_SINGLE_LIST_ENTRY]]:
+        entries: list[Pointer[_SINGLE_LIST_ENTRY]] = []
+        if include_head:
+            entries.append(self)
+        current = self.Next
+        while pykd.isValid(int(current)):
+            entries.append(current)
+            current = current.Next
+        return entries
+    
+@dataclass
+class _HEAP_LFH_BLOCK_SLIST(_SINGLE_LIST_ENTRY):
+    def __init__(self, heap_lfh_block_slist):
+        super().__init__(heap_lfh_block_slist)
+        # Assuming heap_lfh_block_slist has no additional fields for now, can be extended later
+    
+@dataclass
+class _HEAP_LFH_PTRREF_LIST(_LIST_ENTRY):
+    def __init__(self, heap_lfh_ptrref_list):
+        super().__init__(heap_lfh_ptrref_list)
+
+@dataclass
+class _HEAP_LFH_BLOCK_LIST(PykdObject):
+    Next: int
+    Count: int
+    SList: _HEAP_LFH_BLOCK_SLIST
+    ListFields: int
+
+    def __init__(self, heap_lfh_block_list):
+        super().__init__(int(heap_lfh_block_list))
+        self.Next = heap_lfh_block_list.Next
+        self.Count = heap_lfh_block_list.Count
+        self.SList = _HEAP_LFH_BLOCK_SLIST(heap_lfh_block_list.SList)
+        self.ListFields = heap_lfh_block_list.ListFields
+    
+@dataclass
+class _HEAP_LFH_SUBSEGMENT_OWNER(PykdObject):
+    IsBucket: int
+    BucketIndex: int
+    SlotCount: int
+    BucketRef: int
+    PrivateSlotMapRef: int
+    HeatMapRef: int
+    OwnerFreeList: _SINGLE_LIST_ENTRY
+    PrivSlotListEntry: _HEAP_LFH_PTRREF_LIST
+    AvailableSubsegmentList: _LIST_ENTRY
+    FullSubsegmentList: _LIST_ENTRY
+
+    def __init__(self, heap_lfh_segment_owner):
+        super().__init__(int(heap_lfh_segment_owner))
+        self.IsBucket = heap_lfh_segment_owner.IsBucket
+        self.BucketIndex = heap_lfh_segment_owner.BucketIndex
+        self.SlotCount = heap_lfh_segment_owner.SlotCount
+        self.BucketRef = heap_lfh_segment_owner.BucketRef
+        self.PrivateSlotMapRef = heap_lfh_segment_owner.PrivateSlotMapRef
+        self.HeatMapRef = heap_lfh_segment_owner.HeatMapRef
+        self.OwnerFreeList = _SINGLE_LIST_ENTRY(heap_lfh_segment_owner.OwnerFreeList)
+        self.PrivSlotListEntry = _HEAP_LFH_PTRREF_LIST(heap_lfh_segment_owner.PrivSlotListEntry)
+        self.AvailableSubsegmentList = _LIST_ENTRY(heap_lfh_segment_owner.AvailableSubsegmentList)
+        self.FullSubsegmentList = _LIST_ENTRY(heap_lfh_segment_owner.FullSubsegmentList)
+
+@dataclass
+class _HEAP_LFH_SUBSEGMENT_STATE(PykdObject):
+    DelayFreeList: int
+    DelayFreeCount: int
+    Owner: int
+    Location: int
+    DelayFreeFields: int
+    OwnerLocation: int
+    FreeList: _HEAP_LFH_BLOCK_LIST
+
+    def __init__(self, heap_lfh_subsegment_state):
+        super().__init__(int(heap_lfh_subsegment_state))
+        self.DelayFreeList = heap_lfh_subsegment_state.DelayFreeList
+        self.DelayFreeCount = heap_lfh_subsegment_state.DelayFreeCount
+        self.Owner = heap_lfh_subsegment_state.Owner
+        self.Location = heap_lfh_subsegment_state.Location
+        self.DelayFreeFields = heap_lfh_subsegment_state.DelayFreeFields
+        self.OwnerLocation = heap_lfh_subsegment_state.OwnerLocation
+        self.FreeList = _HEAP_LFH_BLOCK_LIST(heap_lfh_subsegment_state.FreeList)
+
+@dataclass
+class _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(PykdObject):
+    BlockSize: int # short
+    FirstBlockOffset: int # short
+    EncodedData: int # union of upper values
+
+    def __init__(self, heap_lfh_subsegment_encoded_offsets):
+        super().__init__(int(heap_lfh_subsegment_encoded_offsets))
+        self.BlockSize = heap_lfh_subsegment_encoded_offsets.BlockSize
+        self.FirstBlockOffset = heap_lfh_subsegment_encoded_offsets.FirstBlockOffset
+        self.EncodedData = heap_lfh_subsegment_encoded_offsets.EncodedData
+    
+    def decode(self, subsegment: _HEAP_LFH_SUBSEGMENT) -> _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS:
+        new_offsets = _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(self)
+        LfhKey = _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(
+            nt.typedVar("_HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS", _RTLP_HP_HEAP_GLOBALS.addr() + 0x8)
+        )
+        shifted_addr = int(subsegment) >> 12
+        
+        new_offsets.BlockSize ^= LfhKey.BlockSize ^ (shifted_addr & 0xffff)
+        new_offsets.FirstBlockOffset ^= LfhKey.FirstBlockOffset ^ ((shifted_addr >> 16) & 0xffff)
+        new_offsets.EncodedData ^= LfhKey.EncodedData ^ shifted_addr
+        return new_offsets
+
+@dataclass
+class _HEAP_LFH_SUBSEGMENT(PykdObject):
+    ListEntry: _LIST_ENTRY
+    State: _HEAP_LFH_SUBSEGMENT_STATE
+    OwnerFreeListEntry: _SINGLE_LIST_ENTRY
+    CommitStateOffset: int
+    FreeCount: int
+    BlockCount: int
+    FreeHint: int
+    CommitUnitShift: int
+    CommitUnitCount: int
+    CommitUnitInfo: int
+    BlockOffsets: _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS
+    BucketRef: int
+    PrivateSlotMapRef: int
+    HighWatermarkBlockIndex: int
+    BitmapSearchWidth: int
+    BlockBitmap: Array[int]
+
+    def __init__(self, heap_lfh_subsegment):
+        super().__init__(int(heap_lfh_subsegment))
+        self.ListEntry = _LIST_ENTRY(heap_lfh_subsegment.ListEntry)
+        self.State = _HEAP_LFH_SUBSEGMENT_STATE(heap_lfh_subsegment.State)
+        self.OwnerFreeListEntry = _SINGLE_LIST_ENTRY(heap_lfh_subsegment.OwnerFreeListEntry)
+        self.CommitStateOffset = heap_lfh_subsegment.CommitStateOffset
+        self.FreeCount = heap_lfh_subsegment.FreeCount
+        self.BlockCount = heap_lfh_subsegment.BlockCount
+        self.FreeHint = heap_lfh_subsegment.FreeHint
+        self.CommitUnitShift = heap_lfh_subsegment.CommitUnitShift
+        self.CommitUnitCount = heap_lfh_subsegment.CommitUnitCount
+        self.CommitUnitInfo = heap_lfh_subsegment.CommitUnitInfo
+        self.BlockOffsets = _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(heap_lfh_subsegment.BlockOffsets)
+        self.BucketRef = heap_lfh_subsegment.BucketRef
+        self.PrivateSlotMapRef = heap_lfh_subsegment.PrivateSlotMapRef
+        self.HighWatermarkBlockIndex = heap_lfh_subsegment.HighWatermarkBlockIndex
+        self.BitmapSearchWidth = heap_lfh_subsegment.BitmapSearchWidth
+        self.BlockBitmap = Array[int](heap_lfh_subsegment.BlockBitmap)
+
+    def from_list_entry(
+        list_entry: _LIST_ENTRY
+    ) -> _HEAP_LFH_SUBSEGMENT:
+        return _HEAP_LFH_SUBSEGMENT(nt.typedVar("_HEAP_LFH_SUBSEGMENT", int(list_entry)))
+        
+@dataclass
+class _HEAP_LFH_FAST_REF(PykdObject):
+    Target: int
+    RefCount: int
+    Value: int
+
+    @property
+    def subsegment(self) -> Pointer[_HEAP_LFH_SUBSEGMENT]:
+        if self.Target == 0:
+            return None
+        return Pointer[_HEAP_LFH_SUBSEGMENT](nt.typedVar("_HEAP_LFH_SUBSEGMENT", self.Target & ~0xfff))
+
+    def __init__(self, heap_lfh_fast_ref):
+        super().__init__(int(heap_lfh_fast_ref))
+        self.Target = heap_lfh_fast_ref.Target
+        self.RefCount = heap_lfh_fast_ref.RefCount
+        self.Value = heap_lfh_fast_ref.Value
+    
+@dataclass
+class _HEAP_SUBALLOCATOR_CALLBACKS(PykdObject):
+    Allocate: int
+    Free: int
+    Commit: int
+    Decommit: int
+    ExtendContext: int
+    TlsCleanup: int
+
+    def __init__(self, heap_suballocator_callbacks):
+        super().__init__(int(heap_suballocator_callbacks))
+        self.Allocate = heap_suballocator_callbacks.Allocate
+        self.Free = heap_suballocator_callbacks.Free
+        self.Commit = heap_suballocator_callbacks.Commit
+        self.Decommit = heap_suballocator_callbacks.Decommit
+        self.ExtendContext = heap_suballocator_callbacks.ExtendContext
+        self.TlsCleanup = heap_suballocator_callbacks.TlsCleanup
+
+@dataclass
+class _HEAP_LFH_CONFIG(PykdObject):
+    def __init__(self, heap_lfh_config):
+        super().__init__(int(heap_lfh_config))
+        # Assuming heap_lfh_config has no fields for now, can be extended later
+    pass
+
+@dataclass
+class _HEAP_LFH_BUCKET(PykdObject):
+    State: _HEAP_LFH_SUBSEGMENT_OWNER
+    TotalBlockCount: int
+    TotalSubsegmentCount: int
+    PrivSlotList: _HEAP_LFH_PTRREF_LIST
+
+    def __init__(self, heap_lfh_bucket):
+        super().__init__(int(heap_lfh_bucket))
+        self.State = _HEAP_LFH_SUBSEGMENT_OWNER(heap_lfh_bucket.State)
+        self.TotalBlockCount = heap_lfh_bucket.TotalBlockCount
+        self.TotalSubsegmentCount = heap_lfh_bucket.TotalSubsegmentCount
+        self.PrivSlotList = _HEAP_LFH_PTRREF_LIST(heap_lfh_bucket.PrivSlotList)
+    
+    @staticmethod
+    def index_from_size(size: int) -> int:
+        def align(size: int) -> int:
+            return (size + 0xf) & ~0xf
+    
+        index_map_idx = ((align(size) + 0xf) >> 4) - 1
+        return int(memoryaccess.get_bytes(
+            memoryaccess.get_addr_from_symbol("ntdll!RtlpLfhBucketIndexMap") + index_map_idx, 
+            1
+        )[0])
+
+@dataclass
+class _HEAP_LFH_SLOT_MAP(PykdObject):
+    Map: Array[uint16_t]
+    def __init__(self, heap_lfh_slot_map):
+        super().__init__(int(heap_lfh_slot_map))
+        self.Map = Array[uint16_t](heap_lfh_slot_map.Map)
 
 @dataclass
 class _HEAP_VS_CONTEXT(PykdObject):
+    def __init__(self, heap_vs_context):
+        super().__init__(int(heap_vs_context))
+        # Assuming heap_vs_context has no fields for now, can be extended later
     pass
 
 @dataclass
 class _HEAP_LFH_CONTEXT(PykdObject):
-    pass
+    BackendCtx: int
+    Callbacks: _HEAP_SUBALLOCATOR_CALLBACKS
+    Config: _HEAP_LFH_CONFIG
+    EncodeKey: int
+    Buckets: Array[Pointer[_HEAP_LFH_BUCKET]]
+    SlotMaps: Array[_HEAP_LFH_SLOT_MAP]
+
+    def __init__(self, heap_lfh_context):
+        super().__init__(int(heap_lfh_context))
+        self.BackendCtx = heap_lfh_context.BackendCtx
+        self.Callbacks = _HEAP_SUBALLOCATOR_CALLBACKS(heap_lfh_context.Callbacks)
+        self.Config = _HEAP_LFH_CONFIG(heap_lfh_context.Config)
+        self.EncodeKey = heap_lfh_context.EncodeKey
+        self.Buckets = Array[Pointer[_HEAP_LFH_BUCKET]](heap_lfh_context.Buckets)
+        self.SlotMaps = Array[_HEAP_LFH_SLOT_MAP](heap_lfh_context.SlotMaps)
+
+@dataclass
+class _RTLP_HP_HEAP_GLOBALS(PykdObject):
+    HeapKey: int
+    LfhKey: int
+    Flags: int
+    RandomSeed: int
+
+    def __init__(self, rtlp_hp_heap_globals):
+        super().__init__(int(rtlp_hp_heap_globals))
+        self.HeapKey = rtlp_hp_heap_globals.HeapKey
+        self.LfhKey = rtlp_hp_heap_globals.LfhKey
+        self.Flags = rtlp_hp_heap_globals.Flags
+        self.RandomSeed = rtlp_hp_heap_globals.RandomSeed
+    
+    @staticmethod
+    def addr() -> int:
+        return memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals")
+
+    @staticmethod
+    def get() -> _RTLP_HP_HEAP_GLOBALS:
+        return _RTLP_HP_HEAP_GLOBALS(
+            nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
+        )
+
+@dataclass
+class _HEAP_LFH_AFFINITY_SLOT(PykdObject):
+    State: _HEAP_LFH_SUBSEGMENT_OWNER
+    ActiveSubsegment: _HEAP_LFH_FAST_REF
+    
+    def __init__(self, heap_lfh_affinity_slot):
+        super().__init__(int(heap_lfh_affinity_slot))
+        self.State = _HEAP_LFH_SUBSEGMENT_OWNER(heap_lfh_affinity_slot.State)
+        self.ActiveSubsegment = _HEAP_LFH_FAST_REF(heap_lfh_affinity_slot.ActiveSubsegment)
+    
+    @staticmethod
+    def from_map_index(
+        lfh_context: _HEAP_LFH_CONTEXT, map_index: int
+    ) -> _HEAP_LFH_AFFINITY_SLOT:
+        return _HEAP_LFH_AFFINITY_SLOT(
+            nt.typedVar(
+                "_HEAP_LFH_AFFINITY_SLOT", 
+                int(lfh_context) + map_index * _HEAP_LFH_AFFINITY_SLOT.size()
+            )
+        )
 
 @dataclass
 class _SEGMENT_HEAP(PykdObject):
     Signature: int
     SegContexts: Array[_HEAP_SEG_CONTEXT]
-    VsContext: Pointer[_HEAP_VS_CONTEXT]
-    LfhContext: Pointer[_HEAP_LFH_CONTEXT]
+    VsContext: _HEAP_VS_CONTEXT
+    LfhContext: _HEAP_LFH_CONTEXT
 
     def __init__(self, segment_heap):
         super().__init__(int(segment_heap))
         self.Signature = segment_heap.Signature
         self.SegContexts = Array[_HEAP_SEG_CONTEXT](segment_heap.SegContexts)
-        self.VsContext = Pointer[_HEAP_VS_CONTEXT](segment_heap.VsContext)
-        self.LfhContext = Pointer[_HEAP_LFH_CONTEXT](segment_heap.LfhContext)
+        self.VsContext = _HEAP_VS_CONTEXT(segment_heap.VsContext)
+        self.LfhContext = _HEAP_LFH_CONTEXT(segment_heap.LfhContext)
 
 class SegmentHeap():
     def __init__(self):
-        self._RTLP_HP_HEAP_GLOBALS = nt.typedVar(
-            "_RTLP_HP_HEAP_GLOBALS",
-            memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"),
-        )
-        self.buckets_cnt = 130
+        self.buckets_cnt = 128
         pass
 
     def _SEGMENT_HEAP(self, heap_address: int) -> _SEGMENT_HEAP:
         return _SEGMENT_HEAP(nt.typedVar("_SEGMENT_HEAP", heap_address))
 
     def print_bucket(
-        self, bucket: nt.typedVar("_HEAP_LFH_BUCKET", int), size: int, banner=True
+        self, lfh_context: _HEAP_LFH_CONTEXT, bucket: _HEAP_LFH_BUCKET, size: int, banner=True
     ) -> None:
-        def print_lfh_subsegment(self, curr: int, size: int, once: bool) -> bool:
-            subsegment: nt.typedVar("_HEAP_LFH_SUBSEGMENT", int) = (
-                self._HEAP_LFH_SUBSEGMENT(curr)
-            )
-            BlockCount: int = subsegment.BlockCount
-            FreeHint: int = subsegment.FreeHint
-            FreeCount: int = subsegment.FreeCount
-            Location: int = subsegment.Location
+        def print_lfh_subsegment(self, lfh_context: _HEAP_LFH_CONTEXT, bucket_index: int, once: bool) -> bool:
+            map_idx = lfh_context.SlotMaps[0].Map[bucket_index]
+            affinity_slot = _HEAP_LFH_AFFINITY_SLOT.from_map_index(lfh_context, map_idx)
 
-            BlockOffsets: int = (
-                subsegment.BlockOffsets.EncodedData
-                ^ (int(subsegment) >> 12)
-                ^ self._RTLP_HP_HEAP_GLOBALS.LfhKey
-            )
-            BlockSize: int = BlockOffsets & 0xFFFF
-            # FirstBlock: int = int(subsegment) + ((BlockOffsets >> 16) & 0xffff)
+            lfh_subsegment = affinity_slot.ActiveSubsegment.subsegment.deref()
+            BlockOffsets = lfh_subsegment.BlockOffsets.decode(lfh_subsegment)
+            BlockCnt = lfh_subsegment.CommitStateOffset - 0x8
 
-            if BlockSize != size and size != -1:
+            if affinity_slot != size and size != -1:
                 return once
 
             if once:
-                dprint.println(f"BucketIndex: {self.BucketIndex(bucket)}")
+                dprint.println(f"BucketIndex: {int(bucket_index)}")
                 once = False
 
-            BlockBitmap: bytes = memoryaccess.get_bytes(
-                subsegment.BlockBitmap,
-                BlockCount / 4 if BlockCount % 4 == 0 else BlockCount / 4 + 1,
-            )
+            BlockBitmap: list[int] = [] 
+            for i in range(BlockCnt):
+                BlockBitmap.append(
+                    memoryaccess.get_ulong(lfh_subsegment.BlockBitmap.address + i * 8)
+                )
 
             dprint.println(
-                f"    Subsegment: {colour.colorize_hex_by_address(int(subsegment))}",
+                f"    Subsegment: {colour.colorize_hex_by_address(int(lfh_subsegment))}",
                 dml=True,
             )
             dprint.print(
-                f"    Flink: {colour.colorize_hex_by_address(int(subsegment.listEntry.Flink))}, Blink: {colour.colorize_hex_by_address(int(subsegment.listEntry.Blink))}",
+                f"    Flink: {colour.colorize_hex_by_address(int(lfh_subsegment.ListEntry.Flink))}, Blink: {colour.colorize_hex_by_address(int(lfh_subsegment.ListEntry.Blink))}",
                 dml=True,
             )
-            sanity_result = self.check_listentry(subsegment.listEntry)
+            sanity_result = lfh_subsegment.ListEntry.traverse_list_entry()
             if sanity_result[0]:
                 pass
             else:
@@ -2422,42 +2730,35 @@ class SegmentHeap():
             dprint.print_newline()
 
             dprint.println(
-                f"    BlockSize : {colour.blue(f'{BlockSize:#x}')}", dml=True
+                f"    BlockSize : {colour.blue(f'{int(BlockOffsets.BlockSize):#x}')}", dml=True
             )
             dprint.print(
-                f"    BlockCount: {int(BlockCount):#x}, FreeHint: {int(FreeHint):#x}, FreeCount: {int(FreeCount):#x}, ",
+                f"    Total: {int(BlockCnt) * 32:#x}, Remain: {int(affinity_slot.ActiveSubsegment.RefCount):#x} ",
                 dml=True,
             )
 
             LocationEnum = ["AvailableSegment", "FullSegment", "WillRevertToBackend"]
 
             dprint.println(
-                f"Location: {colour.white(f'{LocationEnum[Location]}')}", dml=True
+                f"Location: {colour.white(f'{LocationEnum[0]}')}", dml=True
             )
             dprint.print("    ")
 
-            if BlockCount > 0x800:
+            if BlockCnt * 32 > 0x800:
                 dprint.println(
                     f"    BlockBitmap: {colour.red('(too large to print)')}", dml=True
                 )
                 dprint.print_newline()
                 return once
 
-            for i in range(
-                BlockCount / 4 if BlockCount % 4 == 0 else BlockCount / 4 + 1
-            ):
-                for j in range(0, 8, 2):
-                    if i * 4 + j // 2 >= BlockCount:
-                        break
-
-                    if (BlockBitmap[i] >> j) & 1:
+            for block in BlockBitmap:
+                for j in range(32):
+                    if (block >> j) & 1:
                         dprint.print(colour.green("1"), dml=True)
                     else:
                         dprint.print(colour.red("0"), dml=True)
-
-                if (i + 1) % 16 == 0:
-                    dprint.print_newline()
-                    dprint.print("    ")
+                dprint.print_newline()
+                dprint.print("    ")
 
             dprint.print_newline()
             dprint.print_newline()
@@ -2469,53 +2770,32 @@ class SegmentHeap():
 
         once = True
         already_visited = []
-        curr = self.Bucket_Affinity_AvailableSubsegmentlist(bucket).Flink
-        while curr != self.Bucket_Affinity_AvailableSubsegmentlist(bucket):
-            if not pykd.isValid(curr):
-                dprint.print("    Subsegment: ")
-                dprint.println(
-                    colour.red(f"{int(curr):#x} is invalid address"), dml=True
-                )
-                break
-            if curr in already_visited:
-                dprint.print("    Subsegment: ")
-                dprint.println(
-                    colour.red(f"{int(curr):#x} is already visited"), dml=True
-                )
-                break
-            already_visited.append(curr)
-            once = print_lfh_subsegment(self, curr, size, once)
-            curr = curr.Flink
 
-        curr = self.Bucket_Affinity_FullSubsegmentlist(bucket).Flink
-        while curr != self.Bucket_Affinity_FullSubsegmentlist(bucket):
-            if not pykd.isValid(curr):
+        for lfh_subsegment in bucket.State.AvailableSubsegmentList.traverse_list_entry()[1]:
+            if not pykd.isValid(int(lfh_subsegment)):
                 dprint.print("    Subsegment: ")
                 dprint.println(
-                    colour.red(f"{int(curr):#x} is invalid address"), dml=True
+                    colour.red(f"{int(lfh_subsegment):#x} is invalid address"), dml=True
                 )
                 break
-            if curr in already_visited:
-                dprint.print("    Subsegment: ")
-                dprint.println(
-                    colour.red(f"{int(curr):#x} is already visited"), dml=True
-                )
-                break
-            already_visited.append(curr)
-            once = print_lfh_subsegment(self, curr, size, once)
-            curr = curr.Flink
+            if size == -1 or _HEAP_LFH_BUCKET.index_from_size(size) == bucket.State.BucketIndex:
+                once = print_lfh_subsegment(self, lfh_context, bucket.State.BucketIndex, once)
 
         if banner:
             dprint.banner_print("")
 
     def print_lfh(self, heap_address: int, size: int = -1) -> None:
+        segment_heap = self._SEGMENT_HEAP(heap_address)
+        lfh_context = segment_heap.LfhContext
+
         dprint.banner_print(f" [+] LFH Heap ({heap_address:#x}) ")
         avaliable_segments_idx = []
-        for bucket in self.LFH_Buckets(heap_address):
-            if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(
-                bucket, 0
-            ):
-                avaliable_segments_idx.append(self.BucketIndex(bucket))
+        for i in range(self.buckets_cnt):
+            bucket_ptr = segment_heap.LfhContext.Buckets[i]
+            if pykd.isValid(int(bucket_ptr)):
+                bucket = bucket_ptr.deref()
+                if bucket.TotalSubsegmentCount > 0:
+                    avaliable_segments_idx.append(bucket.State.BucketIndex)
         dprint.print(colour.white("avaliable segments: "), dml=True)
 
         for i, idx in enumerate(avaliable_segments_idx):
@@ -2525,15 +2805,17 @@ class SegmentHeap():
             dprint.print(colour.white(f"{idx * 0x10:#x} "), dml=True)
         dprint.println("\n")
 
-        for bucket in self.LFH_Buckets(heap_address):
-            if pykd.isValid(bucket) and self.Bucket_Affinity_AvailableSubsegmentCount(
-                bucket, 0
-            ):
-                self.print_bucket(bucket, size, False)
-            if pykd.isValid(bucket) and self.Bucket_Affinity_FullSubsegmentlist(
-                bucket, 0
-            ):
-                avaliable_segments_idx.append(self.BucketIndex(bucket))
+        for i in range(self.buckets_cnt):
+            bucket_ptr = segment_heap.LfhContext.Buckets[i]
+            if not pykd.isValid(int(bucket_ptr)):
+                continue
+            bucket = bucket_ptr.deref()
+            if bucket.TotalSubsegmentCount > 0:
+                self.print_bucket(lfh_context, bucket, size, banner=False)
+
+            if bucket.TotalBlockCount > bucket.TotalSubsegmentCount:
+                avaliable_segments_idx.append(bucket.State.BucketIndex)
+
         dprint.banner_print("")
 
     def VS_Callback(self, heap_address: int) -> nt.typedVar(
