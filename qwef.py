@@ -1434,7 +1434,7 @@ class _LIST_ENTRY(PykdObject):
         if include_self:
             result.append(self)
 
-        curr = self.Flink.deref()
+        curr = self.Blink.deref()
 
         while curr is not None and curr not in result:
             if curr == self:
@@ -1445,7 +1445,7 @@ class _LIST_ENTRY(PykdObject):
             if not check_result[0]:
                 success = False
                 errorstr += f"Error in list entry {curr}: {check_result[1]}\n"
-            curr = curr.Flink.deref()
+            curr = curr.Blink.deref()
 
         if curr is not None and curr in result:
             success = False
@@ -1469,6 +1469,11 @@ class _RTL_BALANCED_NODE(PykdObject):
         self.Balance = node.Balance
         self.ParentValue = Pointer[_RTL_BALANCED_NODE](node.ParentValue & ~(0b11), _RTL_BALANCED_NODE)
     
+    def get_parent(self) -> Pointer[_RTL_BALANCED_NODE]:
+        if not pykd.isValid(int(self.ParentValue)):
+            return Pointer[_RTL_BALANCED_NODE](0, _RTL_BALANCED_NODE)
+        return Pointer[_RTL_BALANCED_NODE](self.ParentValue.address & ~(0b11), _RTL_BALANCED_NODE)
+
     def return_check_rbtree(self, error: list[str]):
         return (True if error == [] else False, error)
     
@@ -1760,11 +1765,29 @@ class SEH(TEB):
         dprint.banner_print("")
 
 ## ================================================================= Heap =================================================================
-
 @dataclass
-class _HEAP_SEGMENT(PykdObject):
-    def __init__(self, heap_segment):
-        pass
+class _RTLP_HP_HEAP_GLOBALS(PykdObject):
+    HeapKey: int
+    LfhKey: int
+    Flags: int
+    RandomSeed: int
+
+    def __init__(self, rtlp_hp_heap_globals):
+        super().__init__(int(rtlp_hp_heap_globals))
+        self.HeapKey = rtlp_hp_heap_globals.HeapKey
+        self.LfhKey = rtlp_hp_heap_globals.LfhKey
+        self.Flags = rtlp_hp_heap_globals.Flags
+        self.RandomSeed = rtlp_hp_heap_globals.RandomSeed
+    
+    @staticmethod
+    def addr() -> int:
+        return memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals")
+
+    @staticmethod
+    def get() -> _RTLP_HP_HEAP_GLOBALS:
+        return _RTLP_HP_HEAP_GLOBALS(
+            nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
+        )
 
 @dataclass
 class _HEAP_LIST_LOOKUP(PykdObject):
@@ -2336,6 +2359,78 @@ class _HEAP_PAGE_SEGMENT(PykdObject):
                 break
             idx += self.DescArray[idx].UnitSize
         return descs
+    
+class _HEAP_VS_CHUNK_HEADER_SIZE(PykdObject):
+    MemoryCost: int
+    UnsafeSize: int
+    UnsafePrevSize: int
+    Allocated: int
+    
+    def __init__(self, heap_vs_chunk_header_size):
+        super().__init__(int(heap_vs_chunk_header_size))
+        self.MemoryCost = heap_vs_chunk_header_size.MemoryCost
+        self.UnsafeSize = heap_vs_chunk_header_size.UnsafeSize
+        self.UnsafePrevSize = heap_vs_chunk_header_size.UnsafePrevSize
+        self.Allocated = heap_vs_chunk_header_size.Allocated
+        self.KeyUShort = heap_vs_chunk_header_size.KeyUShort
+        self.KeyULong = heap_vs_chunk_header_size.KeyULong
+        self.HeaderBits = heap_vs_chunk_header_size.HeaderBits
+    
+    def decode(self) -> _HEAP_VS_CHUNK_HEADER_SIZE:
+        new_header = _HEAP_VS_CHUNK_HEADER_SIZE(nt.typedVar("_HEAP_VS_CHUNK_HEADER_SIZE", _RTLP_HP_HEAP_GLOBALS.addr()))
+        new_header.MemoryCost ^= self.MemoryCost ^ (int(self) & 0xffff)
+        new_header.UnsafeSize ^= self.UnsafeSize ^ ((int(self) >> 16) & 0xffff)
+        new_header.UnsafePrevSize ^= self.UnsafePrevSize ^ ((int(self) >> 32) & 0xffff)
+        new_header.Allocated ^= self.Allocated ^ ((int(self) >> 48) & 0xffff)
+
+        return new_header
+    
+@dataclass
+class _HEAP_VS_CHUNK_HEADER(PykdObject):
+    Sizes: _HEAP_VS_CHUNK_HEADER_SIZE
+    AllocatedChunkBits: int
+    
+    @property
+    def EncodedSegmentPageOffset(self) -> int:
+        return self.AllocatedChunkBits & 0xff
+    
+    @property
+    def UnusedBytes(self) -> int:
+        return (self.AllocatedChunkBits >> 8) & 0x1
+    
+    @property
+    def SkipDuringWalk(self) -> int:
+        return (self.AllocatedChunkBits >> 9) & 0x1
+
+    def __init__(self, heap_vs_chunk_header):
+        super().__init__(int(heap_vs_chunk_header))
+        self.Sizes = _HEAP_VS_CHUNK_HEADER_SIZE(heap_vs_chunk_header.Sizes)
+        self.AllocatedChunkBits = heap_vs_chunk_header.AllocatedChunkBits
+
+@dataclass
+class _HEAP_VS_CHUNK_FREE_HEADER(PykdObject):
+    Header: _HEAP_VS_CHUNK_HEADER
+    Node: _RTL_BALANCED_NODE
+
+    def __init__(self, heap_vs_chunk_free_header):
+        super().__init__(int(heap_vs_chunk_free_header))
+        self.Header = _HEAP_VS_CHUNK_HEADER(heap_vs_chunk_free_header.Header)
+        self.Node = _RTL_BALANCED_NODE(heap_vs_chunk_free_header.Node)
+
+    def from_rbtree_node(node: _RTL_BALANCED_NODE) -> _HEAP_VS_CHUNK_FREE_HEADER:
+        return _HEAP_VS_CHUNK_FREE_HEADER(nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", int(node) - _HEAP_VS_CHUNK_HEADER_SIZE.size()))
+
+    def print_chunk_info(self) -> None:
+        decoded_header = self.Header.Sizes.decode()
+        dprint.println(
+            f"Chunk Header: MemoryCost: {decoded_header.MemoryCost:#x}, UnsafeSize: {decoded_header.UnsafeSize:#x}, UnsafePrevSize: {decoded_header.UnsafePrevSize:#x}, Allocated: {decoded_header.Allocated:#x}",
+            dml=True,
+        )
+        dprint.println(
+            f"Parent: {colour.colorize_hex_by_address(int(self.Node.get_parent()), 8)}, Left: {colour.colorize_hex_by_address(int(self.Node.Left), 8)}, Right: {colour.colorize_hex_by_address(int(self.Node.Right), 8)}",
+            dml=True,
+        )
+
 
 @dataclass
 class _HEAP_SEG_CONTEXT(PykdObject):
@@ -2600,10 +2695,32 @@ class _HEAP_LFH_SLOT_MAP(PykdObject):
 
 @dataclass
 class _HEAP_VS_CONTEXT(PykdObject):
+    SlotMapRef: uint16_t
+    AffinityMask: int
+    Callbacks: _HEAP_SUBALLOCATOR_CALLBACKS
+    
     def __init__(self, heap_vs_context):
         super().__init__(int(heap_vs_context))
-        # Assuming heap_vs_context has no fields for now, can be extended later
-    pass
+        self.SlotMapRef = heap_vs_context.SlotMapRef
+        self.AffinityMask = heap_vs_context.AffinityMask
+        self.Callbacks = _HEAP_SUBALLOCATOR_CALLBACKS(heap_vs_context.Callbacks)
+    
+    def get_affinity_slot(self) -> _HEAP_VS_AFFINITY_SLOT:
+        index = memoryaccess.get_int(int(self) + self.SlotMapRef * 0x40) & 0xffff
+        return _HEAP_VS_AFFINITY_SLOT(
+            nt.typedVar(
+                "_HEAP_VS_AFFINITY_SLOT",
+                int(self) + 0x40 * index
+            )
+        )
+
+@dataclass
+class _HEAP_VS_DELAY_FREE_CONTEXT(PykdObject):
+    ListHead: _SLIST_HEADER
+    
+    def __init__(self, heap_vs_delay_free_context):
+        super().__init__(int(heap_vs_delay_free_context))
+        self.ListHead = _SLIST_HEADER(heap_vs_delay_free_context.ListHead)
 
 @dataclass
 class _HEAP_LFH_CONTEXT(PykdObject):
@@ -2624,28 +2741,59 @@ class _HEAP_LFH_CONTEXT(PykdObject):
         self.SlotMaps = Array[_HEAP_LFH_SLOT_MAP](heap_lfh_context.SlotMaps)
 
 @dataclass
-class _RTLP_HP_HEAP_GLOBALS(PykdObject):
-    HeapKey: int
-    LfhKey: int
-    Flags: int
-    RandomSeed: int
-
-    def __init__(self, rtlp_hp_heap_globals):
-        super().__init__(int(rtlp_hp_heap_globals))
-        self.HeapKey = rtlp_hp_heap_globals.HeapKey
-        self.LfhKey = rtlp_hp_heap_globals.LfhKey
-        self.Flags = rtlp_hp_heap_globals.Flags
-        self.RandomSeed = rtlp_hp_heap_globals.RandomSeed
+class _HEAP_VS_SUBSEGMENT_LIST_ENTRY(_LIST_ENTRY):
+    def __init__(self, heap_vs_subsegment_list_entry):
+        super().__init__(heap_vs_subsegment_list_entry)
     
-    @staticmethod
-    def addr() -> int:
-        return memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals")
+    def traverse_list_entry(self, include_head: bool = True) -> tuple[tuple[bool, str], list[_HEAP_VS_AFFINITY_SLOT]]:
+        success = True
+        result = []
+        errorstr: str = ""
 
-    @staticmethod
-    def get() -> _RTLP_HP_HEAP_GLOBALS:
-        return _RTLP_HP_HEAP_GLOBALS(
-            nt.typedVar("_RTLP_HP_HEAP_GLOBALS", memoryaccess.get_addr_from_symbol("ntdll!RtlpHpHeapGlobals"))
+        if include_head:
+            result.append(self)
+
+        curr = _HEAP_VS_SUBSEGMENT_LIST_ENTRY(
+            nt.typedVar(
+                "_LIST_ENTRY", 
+                int(self.Flink) ^ int(self)
+            )
         )
+
+        while curr is not None and curr not in result:
+            if curr == self:
+                break
+            result.append(curr)
+            
+            curr = _HEAP_VS_SUBSEGMENT_LIST_ENTRY(
+                nt.typedVar(
+                    "_LIST_ENTRY", 
+                    int(curr.Flink) ^ int(curr)
+                )
+            )
+
+        if curr is not None and curr in result:
+            success = False
+            errorstr += f"List entry {curr} is in the list more than once.\n"
+
+        return (success, errorstr), result
+
+
+@dataclass
+class _HEAP_VS_AFFINITY_SLOT(PykdObject):
+    VsContext: Pointer[_HEAP_VS_CONTEXT]
+    Lock: int
+    FreeChunkTree: _RTL_RB_TREE
+    SubsegmentList: _HEAP_VS_SUBSEGMENT_LIST_ENTRY
+    DelayFreeContext: _HEAP_VS_DELAY_FREE_CONTEXT
+
+    def __init__(self, heap_vs_affinity_slot):
+        super().__init__(int(heap_vs_affinity_slot))
+        self.VsContext = Pointer[_HEAP_VS_CONTEXT](heap_vs_affinity_slot.VsContext)
+        self.Lock = heap_vs_affinity_slot.Lock
+        self.FreeChunkTree = _RTL_RB_TREE(heap_vs_affinity_slot.FreeChunkTree)
+        self.SubsegmentList = _HEAP_VS_SUBSEGMENT_LIST_ENTRY(heap_vs_affinity_slot.SubsegmentList)
+        self.DelayFreeContext = _HEAP_VS_DELAY_FREE_CONTEXT(heap_vs_affinity_slot.DelayFreeContext)
 
 @dataclass
 class _HEAP_LFH_AFFINITY_SLOT(PykdObject):
@@ -2818,98 +2966,89 @@ class SegmentHeap():
 
         dprint.banner_print("")
 
-    def VS_Callback(self, heap_address: int) -> nt.typedVar(
-        "_HEAP_SUBALLOCATOR_CALLBACKS", int
-    ):
-        return self.VSContext(heap_address).Callbacks
+    def print_vs(self, heap_address: int) -> None:
+        segment_heap = self._SEGMENT_HEAP(heap_address)
+        vs_context = segment_heap.VsContext
+        dprint.banner_print(f" [+] VS Heap ({heap_address:#x}) ")
 
-    def VS_FreeChunkTree_Root(self, heap_address: int) -> nt.typedVar(
-        "_RTL_BALANCED_NODE", int
-    ):
-        if self.VSContext(heap_address).FreeChunkTree.Encoded == 0:
-            return nt.typedVar(
-                "_RTL_BALANCED_NODE", self.VSContext(heap_address).FreeChunkTree.Root
-            )
-        else:
-            return nt.typedVar(
-                "_RTL_BALANCED_NODE",
-                self.VSContext(heap_address).FreeChunkTree.Root
-                ^ int(self.VSContext(heap_address).FreeChunkTree),
-            )
-
-    def VS_inuse_chunk_header(self, chunk_address: int) -> nt.typedVar(
-        "_HEAP_VS_CHUNK_HEADER", int
-    ):
-        return nt.typedVar("_HEAP_VS_CHUNK_HEADER", chunk_address)
-
-    def VS_freed_chunk_header(self, chunk_address: int) -> nt.typedVar(
-        "_HEAP_VS_CHUNK_FREE_HEADER", int
-    ):
-        return nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", chunk_address)
-
-    @dataclass
-    class VS_Sizes:
-        MemoryCost: int
-        UnsafeSize: int
-        ActualSize: int
-        UnsafePrevSize: int
-        ActualPrevSize: int
-        Allocated: bool = int
-
-    def VS_decode_chunk_Sizes(self, chunk_address: int) -> VS_Sizes:
-        Sizes = int(self.VS_inuse_chunk_header(chunk_address).Sizes.HeaderBits)
-        Sizes ^= chunk_address ^ self._RTLP_HP_HEAP_GLOBALS.HeapKey
-
-        return self.VS_Sizes(
-            MemoryCost=Sizes & 0xFFFF,
-            UnsafeSize=(Sizes >> 16) & 0xFFFF,
-            ActualSize=(((Sizes >> 16) & 0xFFFF) << 4),
-            UnsafePrevSize=(Sizes >> 32) & 0xFFFF,
-            ActualPrevSize=(((Sizes >> 32) & 0xFFFF) << 4),
-            Allocated=(Sizes >> 48) & 0xFF,
+        affinity_slot = vs_context.get_affinity_slot()
+        dprint.println(
+            colour.white(
+                f"VsContext: {colour.colorize_string_by_address(f'0x{int(vs_context):08x}', vs_context)}"
+            ),
+            dml=True,
         )
 
-    def VS_FreeChunkTree_Inorder(self, heap_address: int) -> list:
-        return self.traversal_rbtree(self.VS_FreeChunkTree_Root(heap_address))
+        dprint.println(
+            colour.white(
+                f"AffinitySlot: {colour.colorize_string_by_address(f'0x{int(affinity_slot):08x}', affinity_slot)}"
+            ),
+            dml=True,
+        )
 
-    def print_vs(self, heap_address: int) -> None:
-        freed_chunks = self.VS_FreeChunkTree_Inorder(heap_address)
+        dprint.print_newline()
 
-        dprint.banner_print(f" [+] VS Heap ({heap_address:#x}) ")
-        for rbtree_node in freed_chunks:
-            chunk = nt.typedVar("_HEAP_VS_CHUNK_FREE_HEADER", rbtree_node - 8)
-
-            if not pykd.isValid(chunk):
+        for subsegment in affinity_slot.SubsegmentList.traverse_list_entry()[1]:
+            if not pykd.isValid(int(subsegment)):
                 dprint.println(
-                    colour.red(f"0x{chunk:08x} is invalid address"), dml=True
+                    colour.red(f"Invalid subsegment address: {int(subsegment)}"), dml=True
                 )
                 continue
-            chunk_Sizes = self.VS_decode_chunk_Sizes(chunk)
-            isroot = chunk == self.VS_FreeChunkTree_Root(heap_address) - 8
 
-            if isroot:
-                dprint.println(colour.brown("Root"), dml=True)
-            dprint.print(
-                f"addr: {colour.colorize_hex_by_address(int(chunk))}", dml=True
+            dprint.println(
+                colour.white(
+                    f"Subsegment: {colour.colorize_string_by_address(f'0x{int(subsegment):08x}', subsegment)}"
+                ),
+                dml=True,
             )
-            check_rbtree = self.check_rbtree_node(rbtree_node, isroot)
-            if check_rbtree[0]:
-                dprint.print_newline()
-            else:
+
+            for free_chunk in affinity_slot.FreeChunkTree.traversal_rbtree():
+                chunk = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
+
                 dprint.println(
-                    colour.red(" " * 30 + f"({', '.join(check_rbtree[1])})"), dml=True
+                    colour.white(
+                        f"Chunk: {colour.colorize_string_by_address(f'0x{int(chunk):08x}', chunk)}"
+                    ),
+                    dml=True,
                 )
-            dprint.println(
-                f"Size: {colour.blue(f'0x{chunk_Sizes.ActualSize:04x}')}, PrevChunkAddr: {colour.colorize_hex_by_address(int(chunk - chunk_Sizes.ActualSize))}",
-                dml=True,
-            )
-            dprint.println(
-                f"Parent: {colour.colorize_hex_by_address(rbtree_node.ParentValue)}, Left: {colour.colorize_hex_by_address(rbtree_node.Left)}, Right: {colour.colorize_hex_by_address(rbtree_node.Right)}",
-                dml=True,
-            )
-
+                chunk.print_chunk_info()
+                dprint.print_newline()
+                
             dprint.print_newline()
-        dprint.banner_print("")
+
+    def print_freed_vs(self, heap_address: int) -> None:
+        segment_heap = self._SEGMENT_HEAP(heap_address)
+        vs_context = segment_heap.VsContext
+        dprint.banner_print(f" [+] VS Heap ({heap_address:#x}) ")
+
+        affinity_slot = vs_context.get_affinity_slot()
+        dprint.println(
+            colour.white(
+                f"VsContext: {colour.colorize_string_by_address(f'0x{int(vs_context):08x}', vs_context)}"
+            ),
+            dml=True,
+        )
+
+        dprint.println(
+            colour.white(
+                f"AffinitySlot: {colour.colorize_string_by_address(f'0x{int(affinity_slot):08x}', affinity_slot)}"
+            ),
+            dml=True,
+        )
+
+        dprint.print_newline()
+
+        for free_chunk in affinity_slot.FreeChunkTree.traversal_rbtree():
+            chunk = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
+
+            dprint.println(
+                colour.white(
+                    f"Chunk: {colour.colorize_string_by_address(f'0x{int(chunk):08x}', chunk)}"
+                ),
+                dml=True,
+            )
+            chunk.print_chunk_info()
+            dprint.print_newline()
 
     def print_segment(self, heap_address: int) -> None:
         dprint.banner_print(f" [+] Segment ({heap_address:#x}) ")
@@ -3132,6 +3271,12 @@ class Heap(PEB):
     def print_segment(self, heap_address: int, idx: int = -1) -> None:
         if self.is_SegmentHeap(heap_address):
             self.SegmentHeap.print_segment(heap_address)
+        else:
+            dprint.fail_print("Heap type is not supported")
+
+    def print_freed_vs(self, heap_address: int) -> None:
+        if self.is_SegmentHeap(heap_address):
+            self.SegmentHeap.print_freed_vs(heap_address)
         else:
             dprint.fail_print("Heap type is not supported")
 
@@ -3358,6 +3503,15 @@ if __name__ == "__main__":
                         heap.print_segment(
                             heap.get_heaps_address()[stoi.str2int(sys.argv[3])],
                             stoi.str2int(sys.argv[4]),
+                        )
+                elif sys.argv[2] == "vs":
+                    if sys.argv[3] == "freed":
+                        heap.print_freed_vs(
+                            heap.get_heaps_address()[stoi.str2int(sys.argv[4])]
+                        )
+                    else:
+                        heap.print_vs(
+                            heap.get_heaps_address()[stoi.str2int(sys.argv[3])]
                         )
 
             else:
