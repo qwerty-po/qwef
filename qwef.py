@@ -1437,7 +1437,7 @@ class _LIST_ENTRY(PykdObject):
         curr = self.Blink.deref()
 
         while curr is not None and curr not in result:
-            if curr == self:
+            if int(curr) == int(self):
                 break
             result.append(curr)
             check_result = curr.check_list_entry()
@@ -2423,7 +2423,7 @@ class _HEAP_VS_CHUNK_FREE_HEADER(PykdObject):
     def print_chunk_info(self) -> None:
         decoded_header = self.Header.Sizes.decode()
         dprint.println(
-            f"Chunk Header: MemoryCost: {decoded_header.MemoryCost:#x}, UnsafeSize: {decoded_header.UnsafeSize:#x}, UnsafePrevSize: {decoded_header.UnsafePrevSize:#x}, Allocated: {decoded_header.Allocated:#x}",
+            f"Chunk Header: MemoryCost: {decoded_header.MemoryCost:#x}, Size: {colour.blue(f'{(decoded_header.UnsafeSize << 4):#x}')}, PrevSize: {colour.blue(f'{(decoded_header.UnsafePrevSize << 4):#x}')}, Allocated: {decoded_header.Allocated:#x}",
             dml=True,
         )
         dprint.println(
@@ -2574,6 +2574,32 @@ class _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(PykdObject):
         new_offsets.FirstBlockOffset ^= LfhKey.FirstBlockOffset ^ ((shifted_addr >> 16) & 0xffff)
         new_offsets.EncodedData ^= LfhKey.EncodedData ^ shifted_addr
         return new_offsets
+    
+@dataclass
+class _HEAP_VS_SUBSEGMENT(PykdObject):
+    ListEntry: _HEAP_VS_SUBSEGMENT_LIST_ENTRY
+    CommitBitmap: int
+    CommitLock: int
+    Size: int
+    OwnerSlotRef: int
+    Signature: int
+    FullCommit: int
+
+    def __init__(self, heap_vs_subsegment):
+        super().__init__(int(heap_vs_subsegment))
+        self.ListEntry = _HEAP_VS_SUBSEGMENT_LIST_ENTRY(heap_vs_subsegment.ListEntry)
+        self.CommitBitmap = heap_vs_subsegment.CommitBitmap
+        self.CommitLock = heap_vs_subsegment.CommitLock
+        self.Size = heap_vs_subsegment.Size
+        self.OwnerSlotRef = heap_vs_subsegment.OwnerSlotRef
+        self.Signature = heap_vs_subsegment.Signature
+        self.FullCommit = heap_vs_subsegment.FullCommit
+
+    def from_list_entry(
+        list_entry: _HEAP_VS_SUBSEGMENT_LIST_ENTRY
+    ) -> _HEAP_VS_SUBSEGMENT:
+        return _HEAP_VS_SUBSEGMENT(nt.typedVar("_HEAP_VS_SUBSEGMENT", int(list_entry)))
+    
 
 @dataclass
 class _HEAP_LFH_SUBSEGMENT(PykdObject):
@@ -2745,7 +2771,7 @@ class _HEAP_VS_SUBSEGMENT_LIST_ENTRY(_LIST_ENTRY):
     def __init__(self, heap_vs_subsegment_list_entry):
         super().__init__(heap_vs_subsegment_list_entry)
     
-    def traverse_list_entry(self, include_head: bool = True) -> tuple[tuple[bool, str], list[_HEAP_VS_AFFINITY_SLOT]]:
+    def traverse_list_entry(self, include_head: bool = True) -> tuple[tuple[bool, str], list[_HEAP_VS_SUBSEGMENT_LIST_ENTRY]]:
         success = True
         result = []
         errorstr: str = ""
@@ -2761,7 +2787,7 @@ class _HEAP_VS_SUBSEGMENT_LIST_ENTRY(_LIST_ENTRY):
         )
 
         while curr is not None and curr not in result:
-            if curr == self:
+            if int(curr) == int(self):
                 break
             result.append(curr)
             
@@ -2988,7 +3014,9 @@ class SegmentHeap():
 
         dprint.print_newline()
 
-        for subsegment in affinity_slot.SubsegmentList.traverse_list_entry()[1]:
+        for subsegment_node in affinity_slot.SubsegmentList.traverse_list_entry(False)[1]:
+            subsegment = _HEAP_VS_SUBSEGMENT.from_list_entry(subsegment_node)
+
             if not pykd.isValid(int(subsegment)):
                 dprint.println(
                     colour.red(f"Invalid subsegment address: {int(subsegment)}"), dml=True
@@ -2997,10 +3025,11 @@ class SegmentHeap():
 
             dprint.println(
                 colour.white(
-                    f"Subsegment: {colour.colorize_string_by_address(f'0x{int(subsegment):08x}', subsegment)}"
+                    f"Subsegment: {colour.colorize_string_by_address(f'0x{int(subsegment):08x}', subsegment)}, Size: {colour.blue(hex(subsegment.Size << 4))}", 
                 ),
                 dml=True,
             )
+            dprint.print_newline()
 
             for free_chunk in affinity_slot.FreeChunkTree.traversal_rbtree():
                 chunk = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
@@ -3013,7 +3042,8 @@ class SegmentHeap():
                 )
                 chunk.print_chunk_info()
                 dprint.print_newline()
-                
+
+            dprint.print_newline() 
             dprint.print_newline()
 
     def print_freed_vs(self, heap_address: int) -> None:
