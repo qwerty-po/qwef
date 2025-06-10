@@ -314,7 +314,7 @@ class EflagsRegister:
 
 class MemoryAccess:
     def __init__(self):
-        self.addr_symbol: Dict[int, str] = {}
+        self.addr_symbol: dict[int, str] = {}
 
         self.filename: str = f"{tempfile.gettempdir()}\\{pykd.getProcessSystemID()}.sym"
         if os.path.exists(self.filename):
@@ -1855,7 +1855,7 @@ class _HEAP_USERDATA_HEADER(PykdObject):
     Signature: int
     EncodedOffsets: int
     BusyBitmap: _RTL_BITMAP_EX
-    BitmapData: Array[Bool]
+    BitmapData: Array[Bit]
 
     def __init__(self, heap_userdata_header):
         super().__init__(int(heap_userdata_header))
@@ -1867,7 +1867,7 @@ class _HEAP_USERDATA_HEADER(PykdObject):
         self.Signature = heap_userdata_header.Signature
         self.EncodedOffsets = heap_userdata_header.EncodedOffsets
         self.BusyBitmap = _RTL_BITMAP_EX(heap_userdata_header.BusyBitmap)
-        self.BitmapData = Array[Bool](heap_userdata_header.BitmapData)
+        self.BitmapData = Array[Bit](heap_userdata_header.BitmapData)
     
 @dataclass
 class _HEAP_LOCAL_DATA(PykdObject):
@@ -2009,6 +2009,11 @@ class _LFH_HEAP(PykdObject):
         self.SegmentInfoArrays = Array[Pointer[_HEAP_LOCAL_SEGMENT_INFO]](
             lfh_heap.SegmentInfoArrays
         )
+
+@dataclass
+class _HEAP_SEGMENT(PykdObject):
+    def __init__(self, heap_segment):
+        pass
 
 @dataclass
 class _HEAP(PykdObject):
