@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import enum
 import json
 import math
@@ -822,6 +823,9 @@ class PrintManager:
 
     def print_newline(self):
         self.println("")
+    
+    def remove_last_line(self):
+        self.query.pop()
 
 ## ================================================================= Context Manager =================================================================
 
@@ -1045,6 +1049,44 @@ class ContextManager:
         self.print_context()
         pykd.dbgCommand("si")
 
+    def execute(self, params: list[str]):
+        cmd, args = params[0], params[1:]
+        if len(args) > 0 and args[0] == "help":
+            dprint.println(
+                colour.white("[*] Usage: c [count], ni [count], si [count], count is optinoal"),
+                dml=True,
+            )
+        elif cmd == "c":
+            if args == []:
+                context.conti()
+            elif len(args) == 1:
+                conti_count = int(args[0], 16) if args[0].startswith("0x") else int(args[0])
+                self.conti(conti_count)
+            else:
+                dprint.println(
+                    colour.white("[*] Usage: c [count], count is optional"), dml=True
+                )
+        elif cmd == "ni":
+            if args == []:
+                context.ni()
+            elif len(args) == 1:
+                ni_count = int(args[0], 16) if args[0].startswith("0x") else int(args[0])
+                self.ni(ni_count)
+            else:
+                dprint.println(
+                    colour.white("[*] Usage: ni [count], count is optional"), dml=True
+                )
+        elif cmd == "si":
+            if args == []:
+                context.si()
+            elif len(args) == 1:
+                si_count = int(args[0], 16) if args[0].startswith("0x") else int(args[0])
+                self.si(si_count)
+            else:
+                dprint.println(
+                    colour.white("[*] Usage: si [count], count is optional"), dml=True
+                )
+
 ## ================================================================= Search Pattern =================================================================
 
 class SearchPattern:
@@ -1182,6 +1224,9 @@ class SearchPattern:
                         dprint.success_print(
                             f"In {colour.blue(info)} ({hex(section.base_address)}-{hex(section.end_address)} [{PageProtect.to_str(section.protect)}])"
                         )
+                    dprint.print(
+                        f"{colour.colorize_hex_by_address(addr, 16)}", dml=True
+                    )
                     dprint.print(":\t")
 
                     for data in hex_datas:
@@ -1196,6 +1241,7 @@ class SearchPattern:
                             else:
                                 dprint.print(".")
                     dprint.println(" |")
+                dprint.print_newline()
 
             dprint.success_print("Searching pattern finished")
 
@@ -1250,6 +1296,34 @@ class SearchPattern:
                     dprint.println(" |")
 
             dprint.success_print("Searching pattern finished")
+
+    def help(self):
+        dprint.println(
+            colour.white(
+                "[*] Usage: find [pattern](int, 0x, 0o, 0b, dec, str) [start] [end], start and end are optional"
+            ),
+            dml=True,
+        )
+        dprint.println(
+            colour.white(
+                "[*] Example: find 0x12345678 0x10000000 0x20000000, find '0x12345678' in range [0x10000000, 0x20000000]"
+            ),
+            dml=True,
+        )
+
+    def execute(self, params: list[str]):
+        command, args = params[0], params[1:]
+        if len(args) > 0 and args[0] == "help":
+            self.help()
+        elif command == "find":
+            if len(args) == 1:
+                self.find(args[0])
+            elif len(args) == 2:
+                self.find(args[0], int(args[1], 16), 0xFFFFFFFFFFFFFFFF)
+            elif len(args) == 3:
+                self.find(args[0], int(args[1], 16), int(args[2], 16))
+            else:
+                self.help()
 
 ## ================================================================ Types =================================================================
 class Bit(int):
@@ -1510,7 +1584,7 @@ class _RTL_BALANCED_NODE(PykdObject):
             )
         return self.return_check_rbtree(error)
 
-    def rbtree_inorder_traversal(self) -> list[_RTL_BALANCED_NODE]:
+    def traverse_rbtree_inorder(self) -> list[_RTL_BALANCED_NODE]:
         inorder = []
 
         if self == 0:
@@ -1519,10 +1593,10 @@ class _RTL_BALANCED_NODE(PykdObject):
             return []
 
         if self.Left != 0 and self.Left not in inorder:
-            inorder.extend(self.Left.deref().rbtree_inorder_traversal())
+            inorder.extend(self.Left.deref().traverse_rbtree_inorder())
         inorder.append(self)
         if self.Right != 0 and self.Right not in inorder:
-            inorder.extend(self.Right.deref().rbtree_inorder_traversal())
+            inorder.extend(self.Right.deref().traverse_rbtree_inorder())
         if not pykd.isValid(int(self.Left)) and self.Left != 0:
             raise pykd.MemoryException(f"Invalid Left pointer in rbtree node: {int(self.Left):#x}")
         if not pykd.isValid(int(self.Right)) and self.Right != 0:
@@ -1542,10 +1616,10 @@ class _RTL_RB_TREE(PykdObject):
         self.Min = Pointer[_RTL_BALANCED_NODE](rbtree.Min, _RTL_BALANCED_NODE)
         self.Encoded = rbtree.Encoded
     
-    def traversal_rbtree(self) -> list[_RTL_BALANCED_NODE]:
+    def traverse_rbtree(self) -> list[_RTL_BALANCED_NODE]:
         if not pykd.isValid(int(self.Root)):
             return []
-        return self.Root.deref().rbtree_inorder_traversal()
+        return self.Root.deref().traverse_rbtree_inorder()
 
 ## ================================================================= PEB / TEB =================================================================
 
@@ -1633,7 +1707,7 @@ class SEH(TEB):
             test.append(self.sehchain[-1])
             if (
                 self.sehchain[-1].Next == context.ptrmask
-                or self.sehchain[-1].Next == None
+                or self.sehchain[-1].Next is None
             ):
                 break
 
@@ -2171,7 +2245,7 @@ class NTHeap():
                                 dml=True,
                             )
                         elif (
-                            listhint[chunk.Size][0] == True
+                            listhint[chunk.Size][0]
                             and listhint[chunk.Size][1].deref() != int(linked_list)
                         ):
                             dprint.print(
@@ -2215,7 +2289,20 @@ class NTHeap():
             if int(lfh_heap.SegmentInfoArrays[i]) == 0:
                 continue
             bucket, segment_info = lfh_heap.Buckets[i], lfh_heap.SegmentInfoArrays[i].deref()
-            block_unit, active_subsegment = bucket.BlockUnits, segment_info.ActiveSubsegment.deref()
+            if segment_info.ActiveSubsegment == 0:
+                dprint.println(
+                    colour.white(
+                        f"segment {i:#x} is empty ({colour.colorize_hex_by_address(0)}, size: {colour.blue(f'{bucket.get_real_size():#x}')})"
+                    ),
+                    dml=True,
+                )
+                dprint.println(
+                    f"heap entry start: {colour.colorize_hex_by_address(0)}",
+                    dml=True,
+                )
+                dprint.print_newline()
+                continue
+            _, active_subsegment = bucket.BlockUnits, segment_info.ActiveSubsegment.deref()
             userdata = active_subsegment.UserBlocks.deref()
 
             if active_subsegment.AggregateExchg.Depth == 0:
@@ -2342,7 +2429,7 @@ class _HEAP_PAGE_SEGMENT(PykdObject):
     def from_page_range_descriptor(
         page_range_descriptor: _HEAP_PAGE_RANGE_DESCRIPTOR
     ) -> _HEAP_PAGE_SEGMENT:
-        return _HEAP_PAGE_SEGMENT(nt.typedVar("_HEAP_PAGE_SEGMENT", int(page_range_descriptor)))
+        return _HEAP_PAGE_SEGMENT(nt.typedVar("_HEAP_PAGE_SEGMENT", int(page_range_descriptor) & ~0x1fff))
     
     @staticmethod
     def from_list_entry(list_entry: _LIST_ENTRY) -> _HEAP_PAGE_SEGMENT:
@@ -2411,6 +2498,23 @@ class _HEAP_VS_CHUNK_HEADER(PykdObject):
         super().__init__(int(heap_vs_chunk_header))
         self.Sizes = _HEAP_VS_CHUNK_HEADER_SIZE(heap_vs_chunk_header.Sizes)
         self.AllocatedChunkBits = heap_vs_chunk_header.AllocatedChunkBits
+    
+    def decode(self) -> _HEAP_VS_CHUNK_HEADER:
+        new_header = _HEAP_VS_CHUNK_HEADER(nt.typedVar("_HEAP_VS_CHUNK_HEADER", _RTLP_HP_HEAP_GLOBALS.addr() - 8))
+        new_header.Sizes = self.Sizes.decode()
+        new_header.AllocatedChunkBits = (new_header.AllocatedChunkBits & ~(0xff)) | (new_header.EncodedSegmentPageOffset ^ self.EncodedSegmentPageOffset ^ (int(self) & 0xff))
+        return new_header
+
+    def print_chunk_info(self) -> None:
+        decoded_header = self.decode()
+        dprint.println(
+            f"MemoryCost: {decoded_header.Sizes.MemoryCost:#x}, Size: {colour.blue(f'{(decoded_header.Sizes.UnsafeSize << 4):#x}')}, PrevSize: {colour.blue(f'{(decoded_header.Sizes.UnsafePrevSize << 4):#x}')}, Allocated: {colour.green(f'{decoded_header.Sizes.Allocated:#x}')}",
+            dml=True,
+        )
+        dprint.println(
+            f"EncodedSegmentPageOffset: {decoded_header.EncodedSegmentPageOffset:#x}, UnusedBytes: {decoded_header.UnusedBytes:#x}, SkipDuringWalk: {decoded_header.SkipDuringWalk:#x}",
+            dml=True,
+        )
 
 @dataclass
 class _HEAP_VS_CHUNK_FREE_HEADER(PykdObject):
@@ -2428,7 +2532,7 @@ class _HEAP_VS_CHUNK_FREE_HEADER(PykdObject):
     def print_chunk_info(self) -> None:
         decoded_header = self.Header.Sizes.decode()
         dprint.println(
-            f"Chunk Header: MemoryCost: {decoded_header.MemoryCost:#x}, Size: {colour.blue(f'{(decoded_header.UnsafeSize << 4):#x}')}, PrevSize: {colour.blue(f'{(decoded_header.UnsafePrevSize << 4):#x}')}, Allocated: {decoded_header.Allocated:#x}",
+            f"MemoryCost: {decoded_header.MemoryCost:#x}, Size: {colour.blue(f'{(decoded_header.UnsafeSize << 4):#x}')}, PrevSize: {colour.blue(f'{(decoded_header.UnsafePrevSize << 4):#x}')}, Allocated: {colour.red(f'{decoded_header.Allocated:#x}')}",
             dml=True,
         )
         dprint.println(
@@ -2578,6 +2682,7 @@ class _HEAP_LFH_SUBSEGMENT_ENCODED_OFFSETS(PykdObject):
         new_offsets.BlockSize ^= LfhKey.BlockSize ^ (shifted_addr & 0xffff)
         new_offsets.FirstBlockOffset ^= LfhKey.FirstBlockOffset ^ ((shifted_addr >> 16) & 0xffff)
         new_offsets.EncodedData ^= LfhKey.EncodedData ^ shifted_addr
+        print(f"Decoded offsets: BlockSize={new_offsets.BlockSize:#x}, FirstBlockOffset={new_offsets.FirstBlockOffset:#x}, EncodedData={new_offsets.EncodedData:#x}")
         return new_offsets
     
 @dataclass
@@ -2604,7 +2709,19 @@ class _HEAP_VS_SUBSEGMENT(PykdObject):
         list_entry: _HEAP_VS_SUBSEGMENT_LIST_ENTRY
     ) -> _HEAP_VS_SUBSEGMENT:
         return _HEAP_VS_SUBSEGMENT(nt.typedVar("_HEAP_VS_SUBSEGMENT", int(list_entry)))
+
+    def dump_all_chunks(self) -> list[_HEAP_VS_CHUNK_HEADER]:
+        chunks: list[_HEAP_VS_CHUNK_HEADER] = []
+        curr = _HEAP_VS_CHUNK_HEADER(nt.typedVar("_HEAP_VS_CHUNK_HEADER", int(self) + 0x30))
+
+        while int(curr) < int(self) + (self.Size << 4):
+            if not pykd.isValid(int(curr)):
+                dprint.println(colour.red(f"Invalid chunk header address: {int(curr)}"))
+                break
+            chunks.append(curr)
+            curr = _HEAP_VS_CHUNK_HEADER(nt.typedVar("_HEAP_VS_CHUNK_HEADER", int(curr) + (curr.Sizes.decode().UnsafeSize << 4)))
     
+        return chunks
 
 @dataclass
 class _HEAP_LFH_SUBSEGMENT(PykdObject):
@@ -2870,21 +2987,14 @@ class SegmentHeap():
         return _SEGMENT_HEAP(nt.typedVar("_SEGMENT_HEAP", heap_address))
 
     def print_bucket(
-        self, lfh_context: _HEAP_LFH_CONTEXT, bucket: _HEAP_LFH_BUCKET, size: int, banner=True
+        self, lfh_context: _HEAP_LFH_CONTEXT, bucket: _HEAP_LFH_BUCKET, index: int, banner=True
     ) -> None:
-        def print_lfh_subsegment(self, lfh_context: _HEAP_LFH_CONTEXT, bucket_index: int, once: bool) -> bool:
-            map_idx = lfh_context.SlotMaps[0].Map[bucket_index]
-            affinity_slot = _HEAP_LFH_AFFINITY_SLOT.from_map_index(lfh_context, map_idx)
-
-            lfh_subsegment = affinity_slot.ActiveSubsegment.subsegment.deref()
+        def print_lfh_subsegment(lfh_subsegment: _HEAP_LFH_SUBSEGMENT, once: bool, bucket_index: int, ignore_bitmap: bool = False) -> bool:
             BlockOffsets = lfh_subsegment.BlockOffsets.decode(lfh_subsegment)
             BlockCnt = lfh_subsegment.CommitStateOffset - 0x8
 
-            if affinity_slot != size and size != -1:
-                return once
-
             if once:
-                dprint.println(f"BucketIndex: {int(bucket_index)}")
+                dprint.println(f"BucketIndex: {int(bucket_index):#x}")
                 once = False
 
             BlockBitmap: list[int] = [] 
@@ -2911,57 +3021,88 @@ class SegmentHeap():
             dprint.println(
                 f"    BlockSize : {colour.blue(f'{int(BlockOffsets.BlockSize):#x}')}", dml=True
             )
+
+            remain = 0
+            for i, block in enumerate(BlockBitmap):
+                for j in range(32):
+                    if i * 32 + j >= lfh_subsegment.BlockCount:
+                        break
+                    if not ((block >> j) & 1):
+                        remain += 1
+
             dprint.print(
-                f"    Total: {int(BlockCnt) * 32:#x}, Remain: {int(affinity_slot.ActiveSubsegment.RefCount):#x} ",
+                f"    Total: {int(lfh_subsegment.BlockCount):#x}, Remain: {remain:#x} ",
                 dml=True,
             )
+            
+            locations = ["AvaliableSubsegment", "FullSubsegment", "WillBeReturnBackToBackend"]
+            dprint.println(f"Location: {locations[lfh_subsegment.State.Location]}", dml=True)
 
-            LocationEnum = ["AvailableSegment", "FullSegment", "WillRevertToBackend"]
-
-            dprint.println(
-                f"Location: {colour.white(f'{LocationEnum[0]}')}", dml=True
-            )
-            dprint.print("    ")
-
-            if BlockCnt * 32 > 0x800:
-                dprint.println(
-                    f"    BlockBitmap: {colour.red('(too large to print)')}", dml=True
-                )
-                dprint.print_newline()
-                return once
-
-            for block in BlockBitmap:
-                for j in range(32):
-                    if (block >> j) & 1:
-                        dprint.print(colour.green("1"), dml=True)
-                    else:
-                        dprint.print(colour.red("0"), dml=True)
-                dprint.print_newline()
+            if not ignore_bitmap:
                 dprint.print("    ")
+                if lfh_subsegment.BlockCount > 0x800:
+                    dprint.println(
+                        f"    BlockBitmap: {colour.red('(too large to print)')}", dml=True
+                    )
+                    dprint.print_newline()
+                    return once
 
-            dprint.print_newline()
-            dprint.print_newline()
-
-            return once
-
+                for i, block in enumerate(BlockBitmap):
+                    for j in range(32):
+                        if i * 32 + j >= lfh_subsegment.BlockCount:
+                            break
+                        if (block >> j) & 1:
+                            dprint.print(colour.green("1"), dml=True)
+                        else:
+                            dprint.print(colour.red("0"), dml=True)
+                    dprint.print_newline()
+                    dprint.print("    ")
+            else:
+                dprint.print_newline()
+        
         if banner:
             dprint.banner_print(f" [+] LFH Bucket ({int(bucket):#x}) ")
 
         once = True
-        already_visited = []
+        map_index = lfh_context.SlotMaps[0].Map[bucket.State.BucketIndex]
+        affinity_slot = _HEAP_LFH_AFFINITY_SLOT.from_map_index(lfh_context, map_index)
+        
+        if affinity_slot.ActiveSubsegment.subsegment is None:
+            if once:
+                dprint.println(f"BucketIndex: {int(bucket.State.BucketIndex):#x}")
+                once = False
+            dprint.println(
+                colour.red("    Active subsegment is not set"),
+                dml=True,
+            )
+        else:
+            once = print_lfh_subsegment(affinity_slot.ActiveSubsegment.subsegment.deref(), once, bucket.State.BucketIndex)
+        dprint.print_newline()
 
-        for lfh_subsegment in bucket.State.AvailableSubsegmentList.traverse_list_entry()[1]:
-            if not pykd.isValid(int(lfh_subsegment)):
-                dprint.print("    Subsegment: ")
+        for subsegment_node in affinity_slot.State.AvailableSubsegmentList.traverse_list_entry(False)[1]:
+            subsegment = _HEAP_LFH_SUBSEGMENT.from_list_entry(subsegment_node)
+            if affinity_slot.ActiveSubsegment.subsegment is not None and int(subsegment) == int(affinity_slot.ActiveSubsegment.subsegment):
+                continue
+            if not pykd.isValid(int(subsegment)):
                 dprint.println(
-                    colour.red(f"{int(lfh_subsegment):#x} is invalid address"), dml=True
+                    colour.red(f"Invalid subsegment address: {int(subsegment)}"), dml=True
                 )
-                break
-            if size == -1 or _HEAP_LFH_BUCKET.index_from_size(size) == bucket.State.BucketIndex:
-                once = print_lfh_subsegment(self, lfh_context, bucket.State.BucketIndex, once)
+                continue   
+            once = print_lfh_subsegment(subsegment, once, bucket.State.BucketIndex)
+
+        dprint.print_newline() 
+        for subsegment_node in affinity_slot.State.FullSubsegmentList.traverse_list_entry(False)[1]:
+            subsegment = _HEAP_LFH_SUBSEGMENT.from_list_entry(subsegment_node)
+            if not pykd.isValid(int(subsegment)):
+                dprint.println(
+                    colour.red(f"Invalid subsegment address: {int(subsegment)}"), dml=True
+                )
+                continue   
+            once = print_lfh_subsegment(subsegment, once, bucket.State.BucketIndex, ignore_bitmap=True)
 
         if banner:
             dprint.banner_print("")
+        dprint.print_newline()
 
     def print_lfh(self, heap_address: int, size: int = -1) -> None:
         segment_heap = self._SEGMENT_HEAP(heap_address)
@@ -3009,6 +3150,7 @@ class SegmentHeap():
             ),
             dml=True,
         )
+        dprint.print_newline()
 
         dprint.println(
             colour.white(
@@ -3020,7 +3162,10 @@ class SegmentHeap():
         dprint.print_newline()
 
         for subsegment_node in affinity_slot.SubsegmentList.traverse_list_entry(False)[1]:
-            subsegment = _HEAP_VS_SUBSEGMENT.from_list_entry(subsegment_node)
+            dprint.println(
+                "-"* 158, dml=True
+            )
+            subsegment: _HEAP_VS_SUBSEGMENT = _HEAP_VS_SUBSEGMENT.from_list_entry(subsegment_node)
 
             if not pykd.isValid(int(subsegment)):
                 dprint.println(
@@ -3036,9 +3181,19 @@ class SegmentHeap():
             )
             dprint.print_newline()
 
-            for free_chunk in affinity_slot.FreeChunkTree.traversal_rbtree():
-                chunk = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
-
+            for chunk in subsegment.dump_all_chunks():
+                if chunk.Sizes.decode().Allocated == 0:
+                    chunk = _HEAP_VS_CHUNK_FREE_HEADER(
+                        nt.typedVar(
+                            "_HEAP_VS_CHUNK_FREE_HEADER", int(chunk)
+                        )
+                    )
+                else:
+                    chunk = _HEAP_VS_CHUNK_HEADER(
+                        nt.typedVar(
+                            "_HEAP_VS_CHUNK_HEADER", int(chunk)
+                        )
+                    )
                 dprint.println(
                     colour.white(
                         f"Chunk: {colour.colorize_string_by_address(f'0x{int(chunk):08x}', chunk)}"
@@ -3048,8 +3203,12 @@ class SegmentHeap():
                 chunk.print_chunk_info()
                 dprint.print_newline()
 
+            dprint.remove_last_line()
+            dprint.println(
+                "-"* 158, dml=True
+            )
+
             dprint.print_newline() 
-            dprint.print_newline()
 
     def print_freed_vs(self, heap_address: int) -> None:
         segment_heap = self._SEGMENT_HEAP(heap_address)
@@ -3064,6 +3223,8 @@ class SegmentHeap():
             dml=True,
         )
 
+        dprint.print_newline()
+
         dprint.println(
             colour.white(
                 f"AffinitySlot: {colour.colorize_string_by_address(f'0x{int(affinity_slot):08x}', affinity_slot)}"
@@ -3073,8 +3234,8 @@ class SegmentHeap():
 
         dprint.print_newline()
 
-        for free_chunk in affinity_slot.FreeChunkTree.traversal_rbtree():
-            chunk = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
+        for free_chunk in affinity_slot.FreeChunkTree.traverse_rbtree():
+            chunk: _HEAP_VS_CHUNK_FREE_HEADER = _HEAP_VS_CHUNK_FREE_HEADER.from_rbtree_node(free_chunk)
 
             dprint.println(
                 colour.white(
@@ -3084,6 +3245,11 @@ class SegmentHeap():
             )
             chunk.print_chunk_info()
             dprint.print_newline()
+
+        dprint.remove_last_line()
+        dprint.println(
+            "-"* 158, dml=True
+        )
 
     def print_segment(self, heap_address: int) -> None:
         dprint.banner_print(f" [+] Segment ({heap_address:#x}) ")
@@ -3153,7 +3319,7 @@ class SegmentHeap():
             free_page_ranges = seg_context.FreePageRanges
 
             first_print = True
-            for node in free_page_ranges.traversal_rbtree():
+            for node in free_page_ranges.traverse_rbtree():
                 page_range_descriptor = _HEAP_PAGE_RANGE_DESCRIPTOR.from_rbtree_node(node)
                 page_segment = _HEAP_PAGE_SEGMENT.from_page_range_descriptor(page_range_descriptor)
                 page_addr = page_segment.get_page_addr(seg_context, page_range_descriptor)
@@ -3169,7 +3335,7 @@ class SegmentHeap():
 
                 dprint.println(
                     colour.white(
-                        f"    Chunk Metadata: {colour.colorize_string_by_address(f'0x{int(node):08x}', int(node))}"
+                        f"    Chunk Metadata: {colour.colorize_string_by_address(f'0x{int(page_range_descriptor):08x}', int(page_range_descriptor))}"
                     ),
                     dml=True,
                 )
@@ -3179,6 +3345,13 @@ class SegmentHeap():
                     ),
                     dml=True,
                 )
+                dprint.println(
+                    colour.white(
+                        f"        Left: {colour.colorize_string_by_address(f'{int(page_range_descriptor.TreeNode.Left):#x}', page_range_descriptor.TreeNode.Left)}, Right: {colour.colorize_string_by_address(f'{int(page_range_descriptor.TreeNode.Right):#x}', page_range_descriptor.TreeNode.Right)}"
+                    ),
+                    dml=True,
+                )
+                dprint.print_newline()
 
             dprint.banner_print("")
 
@@ -3208,64 +3381,6 @@ class Heap(PEB):
             if nt.typedVar("_SEGMENT_HEAP", heap_address).Signature == 0xDDEEDDEE
             else False
         )
-
-    def analysis_chunk(self, chunk_address: int):
-        info = pykd.dbgCommand(f"!heap -x {hex(chunk_address)}")
-        if info == None:
-            dprint.fail_print("Invalid chunk address")
-            return
-
-        info = info.split("\n")[3:]
-        info_dict = {}
-        chunk_info = {}
-
-        for line in info:
-            if ":" not in line:
-                continue
-            key, value = line.split(":")[0].strip(), line.split(":")[1].strip()
-            info_dict[key] = value
-
-        if "Chunk header address" not in info_dict or "Heap Address" not in info_dict:
-            dprint.fail_print(
-                f"Analysis failed, please check the chunk address ({colour.colorize_hex_by_address(chunk_address)})"
-            )
-            return
-
-        if "Variable size allocated chunk" in info_dict["Allocation status"]:
-            chunk_info["status"] = "VS"
-            chunk_info["chunk_address"] = int(info_dict["Chunk header address"], 16)
-            chunk_info["size"] = int(info_dict["Chunk size (bytes)"].split(" ")[0])
-        elif "Backend" in info_dict["Allocation status"]:
-            chunk_info["status"] = "Backend"
-            chunk_info["chunk_address"] = int(info_dict["Block Address"], 16)
-            chunk_info["size"] = int(info_dict["Block Size"].split(" ")[0])
-        elif "LFH" in info_dict["Allocation status"]:
-            chunk_info["status"] = "LFH"
-            chunk_info["chunk_address"] = int(info_dict["Block Address"], 16)
-            chunk_info["size"] = int(info_dict["Block Size"].split(" ")[0])
-
-        if self.is_NTHeap(int(info_dict["Heap Address"], 16)):
-            chunk_info["type"] = "NTHeap"
-            # self.NtHeap.analysis_chunk(chunk_info, info_dict, chunk_info)
-        elif self.is_SegmentHeap(int(info_dict["Heap Address"], 16)):
-            chunk_info["type"] = "SegmentHeap"
-            # self.SegmentHeap.analysis_chunk(chunk_address, info_dict, chunk_info)
-
-        for key, value in chunk_info.items():
-            if type(value) == int:
-                dprint.println(f"{key}: {value:#x}")
-            else:
-                dprint.println(f"{key}: {value}")
-
-        if chunk_info["type"] == "SegmentHeap":
-            if chunk_info["status"] == "VS":
-                self.SegmentHeap.print_vs(int(info_dict["Heap Address"], 16))
-            elif chunk_info["status"] == "LFH":
-                self.SegmentHeap.print_lfh(
-                    int(info_dict["Heap Address"], 16), chunk_info["size"]
-                )
-            elif chunk_info["status"] == "Backend":
-                self.SegmentHeap.print_block(int(info_dict["Heap Address"], 16))
 
     def get_heaps_address(self) -> list[int]:
         peb = self.getPEBInfo()
@@ -3332,13 +3447,120 @@ class Heap(PEB):
             self.NtHeap.print_freelist(heap_address)
             self.NtHeap.print_lfh(heap_address)
         elif self.is_SegmentHeap(heap_address):
-            # self.SegmentHeap.print_lfh(heap_address)
+            self.SegmentHeap.print_lfh(heap_address)
             self.SegmentHeap.print_vs(heap_address)
             self.SegmentHeap.print_segment(heap_address)
-            self.SegmentHeap.print_block(heap_address)
         else:
             dprint.fail_print("Heap type is not supported")
 
+    
+    def execute(self, args: list[str]) -> None:
+        command, args = args[1], args[2:]
+        heap_addresses = self.get_heaps_address()
+        if command == "help":
+            dprint.println(
+                "Usage: heap [command] [index]\n"
+                "Commands:\n"
+                "    indexes: Print heap index\n"
+                "    freelist: Print free list\n"
+                "    lfh: Print LFH heap\n"
+                "    vs: Print VS heap\n"
+                "    segment: Print segment heap\n"
+            )
+
+        elif command == "indexes":
+            for i, heap_address in enumerate(heap_addresses):
+                if self.is_NTHeap(heap_address):
+                    dprint.println(
+                        f"Heap {i}: {colour.colorize_hex_by_address(heap_address)} (NTHeap)",
+                        dml=True
+                    )
+                elif self.is_SegmentHeap(heap_address):
+                    dprint.println(
+                        f"Heap {i}: {colour.colorize_hex_by_address(heap_address)} (SegmentHeap)",
+                        dml=True
+                    )
+                else:
+                    dprint.println(
+                        f"Heap {i}: {colour.colorize_hex_by_address(heap_address)} (Unknown Heap Type)",
+                        dml=True
+                    )
+                
+        elif command == "freelist":
+            if len(args) < 1:
+                dprint.println("[-] Usage: heap freelist [heap_index]")
+                return
+            try:
+                heap_index = int(args[0])
+                if heap_index < 0 or heap_index >= len(heap_addresses):
+                    dprint.println(f"[-] Invalid heap index: {heap_index}")
+                    return
+                self.print_freelist(heap_addresses[heap_index])
+            except ValueError:
+                dprint.println("[-] Invalid heap index format")
+        
+        elif command == "lfh":
+            if len(args) < 1:
+                dprint.println("[-] Usage: heap lfh [heap_index] [size]")
+                return
+            try:
+                heap_index = int(args[0])
+                if heap_index < 0 or heap_index >= len(heap_addresses):
+                    dprint.println(f"[-] Invalid heap index: {heap_index}")
+                    return
+                size = -1
+                if len(args) > 1:
+                    size = stoi.str2int(args[1])
+                self.print_lfh(heap_addresses[heap_index], size)
+            except ValueError:
+                dprint.println("[-] Invalid heap index or size format")
+
+        elif command == "vs":
+            if len(args) < 1:
+                dprint.println("[-] Usage: heap vs [heap_index] [option]")
+                dprint.println("Options: --freed")
+                return
+            try:
+                heap_index = int(args[0])
+                if heap_index < 0 or heap_index >= len(heap_addresses):
+                    dprint.println(f"[-] Invalid heap index: {heap_index}")
+                    return
+                if "--freed" in args:
+                    self.print_freed_vs(heap_addresses[heap_index])
+                else:
+                    self.print_vs(heap_addresses[heap_index])
+            except ValueError:
+                dprint.println("[-] Invalid heap index format")
+        
+        elif command == "segment":
+            if len(args) < 1:
+                dprint.println("[-] Usage: heap segment [heap_index] [option]")
+                dprint.println("Options: --freed")
+                return
+            try:
+                heap_index = int(args[0])
+                if heap_index < 0 or heap_index >= len(heap_addresses):
+                    dprint.println(f"[-] Invalid heap index: {heap_index}")
+                    return
+                if "--freed" in args:
+                    self.print_freed_segment(heap_addresses[heap_index])
+                else:
+                    self.print_segment(heap_addresses[heap_index])
+            except ValueError:
+                dprint.println("[-] Invalid heap index format")
+        
+        elif command == "all":
+            if len(args) < 1:
+                dprint.println("[-] Usage: heap all [heap_index]")
+                return
+            try:
+                heap_index = int(args[0])
+                if heap_index < 0 or heap_index >= len(heap_addresses):
+                    dprint.println(f"[-] Invalid heap index: {heap_index}")
+                    return
+                self.print_all(heap_addresses[heap_index])
+            except ValueError:
+                dprint.println("[-] Invalid heap index format")
 
 class Utils:
     def __init__(self):
@@ -3445,42 +3667,20 @@ if __name__ == "__main__":
         command = sys.argv[1]
         if command == "vmmap":
             vmmap.print_vmmap()
-        elif command == "c":
-            if len(sys.argv) == 2:
-                context.conti()
-            elif len(sys.argv) == 3:
-                if sys.argv[2].startswith("0x"):
-                    context.conti(int(sys.argv[2], 16))
-                else:
-                    context.conti(int(sys.argv[2]))
-        elif command == "ni":
-            if len(sys.argv) == 2:
-                context.ni()
-            elif len(sys.argv) == 3:
-                if sys.argv[2].startswith("0x"):
-                    context.ni(int(sys.argv[2], 16))
-                else:
-                    context.ni(int(sys.argv[2]))
-        elif command == "si":
-            if len(sys.argv) == 2:
-                context.si()
-            elif len(sys.argv) == 3:
-                if sys.argv[2].startswith("0x"):
-                    context.si(int(sys.argv[2], 16))
-                else:
-                    context.si(int(sys.argv[2]))
+
+        elif command == "c" or command == "ni" or command == "si":
+            context.execute(sys.argv[1:])
+
         elif command == "exittable":
             if len(sys.argv) == 2:
                 utils.exittable_viewer()
+
         elif command == "view":
             context.print_context()
+
         elif command == "find":
-            if len(sys.argv) == 3:
-                search.find(sys.argv[2])
-            elif len(sys.argv) == 5:
-                search.find(sys.argv[2], int(sys.argv[3], 16), int(sys.argv[4], 16))
-            else:
-                search.help()
+            search.execute(sys.argv[1:])
+
         elif command == "seh":
             if len(sys.argv) == 2:
                 dprint.println("[-] Usage: seh [view, ...]")
@@ -3489,69 +3689,8 @@ if __name__ == "__main__":
                     seh.print_sehchain()
                 elif sys.argv[5] == "?":
                     dprint.println("[-] Usage: seh [view, ...]")
+                    
         elif command == "heap":
-            if len(sys.argv) == 2:
-                dprint.println(
-                    "[-] Usage: heap [freelist, lfh, vs, segment, block, all] <heap_index>"
-                )
-
-            elif len(sys.argv) == 3:
-                val = stoi.str2int(sys.argv[2])
-                heap.analysis_chunk(val)
-
-            elif len(sys.argv) == 4:
-                if sys.argv[2] == "freelist":
-                    heap.print_freelist(
-                        heap.get_heaps_address()[stoi.str2int(sys.argv[3])]
-                    )
-                elif sys.argv[2] == "lfh":
-                    heap.print_lfh(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
-                elif sys.argv[2] == "vs":
-                    heap.print_vs(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
-                elif sys.argv[2] == "segment":
-                    heap.print_segment(
-                        heap.get_heaps_address()[stoi.str2int(sys.argv[3])]
-                    )
-                elif sys.argv[2] == "block":
-                    heap.print_block(
-                        heap.get_heaps_address()[stoi.str2int(sys.argv[3])]
-                    )
-                elif sys.argv[2] == "all":
-                    heap.print_all(heap.get_heaps_address()[stoi.str2int(sys.argv[3])])
-                elif sys.argv[2] == "?":
-                    dprint.println(
-                        "[-] Usage: heap [freelist, lfh, vs, segment, block, all] <heap_index>"
-                    )
-
-            elif len(sys.argv) == 5:
-                if sys.argv[2] == "lfh":
-                    heap.print_lfh(
-                        heap.get_heaps_address()[stoi.str2int(sys.argv[3])],
-                        stoi.str2int(sys.argv[4]),
-                    )
-                if sys.argv[2] == "segment":
-                    if sys.argv[3] == "freed":
-                        heap.print_freed_segment(
-                            heap.get_heaps_address()[stoi.str2int(sys.argv[4])]
-                        )
-                    else:
-                        heap.print_segment(
-                            heap.get_heaps_address()[stoi.str2int(sys.argv[3])],
-                            stoi.str2int(sys.argv[4]),
-                        )
-                elif sys.argv[2] == "vs":
-                    if sys.argv[3] == "freed":
-                        heap.print_freed_vs(
-                            heap.get_heaps_address()[stoi.str2int(sys.argv[4])]
-                        )
-                    else:
-                        heap.print_vs(
-                            heap.get_heaps_address()[stoi.str2int(sys.argv[3])]
-                        )
-
-            else:
-                dprint.println(
-                    "[-] Usage: heap [freelist, lfh, vs, segment, block, all] <heap_index>"
-                )
+            heap.execute(sys.argv[1:])
 
     dprint.flush()
