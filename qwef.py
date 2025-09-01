@@ -1724,15 +1724,12 @@ class SEH(TEB):
         )
 
     def except_handler3(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
-        EnclosingLevel = int.from_bytes(
-            memoryaccess.get_bytes(sehinfo.Curr + 0x8, 4), byteorder="little"
-        )
-        FilterFunc = int.from_bytes(
-            memoryaccess.get_bytes(sehinfo.Curr + 0xC, 4), byteorder="little"
-        )
-        HandlerFunc = int.from_bytes(
-            memoryaccess.get_bytes(sehinfo.Curr + 0x10, 4), byteorder="little"
-        )
+        scope_table = self.get_scopetable(sehinfo)
+        
+        EnclosingLevel = memoryaccess.get_uint(scope_table)
+        FilterFunc = memoryaccess.get_uint(scope_table + 0x4)
+        HandlerFunc =memoryaccess.get_uint(scope_table + 0x8)
+
         return (EnclosingLevel, FilterFunc, HandlerFunc)
 
     def except_handler4(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
@@ -1772,11 +1769,11 @@ class SEH(TEB):
         return (EnclosingLevel, FilterFunc, HandlerFunc)
 
     def get_except_handler_info(
-        self, sehinfo: SEHInfo
+        self, sehinfo: SEHInfo, seh_type: str
     ) -> Optional[tuple[int, int, int]]:
-        if "_except_handler3" in memoryaccess.get_symbol(sehinfo.Handler):
+        if seh_type == "seh3" or "_except_handler3" in memoryaccess.get_symbol(sehinfo.Handler):
             return self.except_handler3(sehinfo)
-        elif "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
+        elif seh_type == "seh4" or "_except_handler4" in memoryaccess.get_symbol(sehinfo.Handler):
             return self.except_handler4(sehinfo)
         else:
             return None
@@ -1790,7 +1787,7 @@ class SEH(TEB):
         )
         return (old_esp, exc_ptr)
 
-    def print_sehchain(self) -> None:
+    def print_sehchain(self, seh_type: str = "") -> None:
         dprint.banner_print(" SEH Chain ")
         self.sehchain = self.getSEHChain()
         self.exceptone: bool = True
@@ -1825,7 +1822,7 @@ class SEH(TEB):
                         pykd.println(" " * 12 + "try_level < 0, not in try block")
                     old_esp, exc_ptr = self.get_esp_and_exc_ptr(sehinfo)
 
-                    seh_handler_info = self.get_except_handler_info(sehinfo)
+                    seh_handler_info = self.get_except_handler_info(sehinfo, seh_type)
                     if seh_handler_info is not None:
                         EnclosingLevel, FilterFunc, HandlerFunc = seh_handler_info
                         dprint.println(
@@ -3687,8 +3684,11 @@ if __name__ == "__main__":
             if len(sys.argv) == 6:
                 if sys.argv[5] == "view":
                     seh.print_sehchain()
-                elif sys.argv[5] == "?":
+                elif sys.argv[6] == "?":
                     dprint.println("[-] Usage: seh [view, ...]")
+            if len(sys.argv) == 7:
+                if sys.argv[5] == "view":
+                    seh.print_sehchain(sys.argv[6])
                     
         elif command == "heap":
             heap.execute(sys.argv[1:])
