@@ -1750,39 +1750,42 @@ class SEH(TEB):
 
         return (EnclosingLevel, FilterFunc, HandlerFunc)
 
-    def except_handler4(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
-        security_cookie = memoryaccess.get_uint(
-            memoryaccess.get_code_security_cookie(pykd.dbgCommand("lme 1m").strip())
-        )
-        scopetable_array = self.get_scopetable(sehinfo) ^ security_cookie
+    def except_handler4(self, sehinfo: SEHInfo) -> Optional[tuple[int, int, int]]:
+        try:
+            security_cookie = memoryaccess.get_uint(
+                memoryaccess.get_code_security_cookie(pykd.dbgCommand("lme 1m").strip())
+            )
+            scopetable_array = self.get_scopetable(sehinfo) ^ security_cookie
 
-        gs_cookie_offset = memoryaccess.get_int(scopetable_array)
-        gs_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0x4)
-        eh_cookie_offset = memoryaccess.get_int(scopetable_array + 0x8)
-        eh_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0xC)
+            gs_cookie_offset = memoryaccess.get_int(scopetable_array)
+            gs_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0x4)
+            eh_cookie_offset = memoryaccess.get_int(scopetable_array + 0x8)
+            eh_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0xC)
 
-        assert not (gs_cookie_offset == None and eh_cookie_offset == None)
+            assert not (gs_cookie_offset == None and eh_cookie_offset == None)
 
-        checker = 0
+            checker = 0
 
-        if gs_cookie_offset != -2:
-            checker = gs_cookie_offset
-        else:
-            checker = eh_cookie_offset
+            if gs_cookie_offset != -2:
+                checker = gs_cookie_offset
+            else:
+                checker = eh_cookie_offset
 
-        EnclosingLevel = int.from_bytes(
-            memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker, 4),
-            byteorder="little",
-        )
-        FilterFunc = int.from_bytes(
-            memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker + 0x4, 4),
-            byteorder="little",
-        )
-        HandlerFunc = int.from_bytes(
-            memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker + 0x8, 4),
-            byteorder="little",
-        )
-        return (EnclosingLevel, FilterFunc, HandlerFunc)
+            EnclosingLevel = int.from_bytes(
+                memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker, 4),
+                byteorder="little",
+            )
+            FilterFunc = int.from_bytes(
+                memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker + 0x4, 4),
+                byteorder="little",
+            )
+            HandlerFunc = int.from_bytes(
+                memoryaccess.get_bytes(scopetable_array + 0x10 + 0xC * checker + 0x8, 4),
+                byteorder="little",
+            )
+            return (EnclosingLevel, FilterFunc, HandlerFunc)
+        except:
+            return None
 
     def get_except_handler_info(
         self, sehinfo: SEHInfo, seh_type: str
