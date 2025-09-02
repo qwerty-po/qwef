@@ -8,6 +8,7 @@ import os
 import string
 import sys
 import tempfile
+import lief
 from dataclasses import asdict, dataclass
 
 import pykd
@@ -351,6 +352,23 @@ class MemoryAccess:
             )
         except pykd.MemoryException:
             return None
+
+    def get_code_security_cookie(self, module_name: str) -> Optional[int]:
+        module = pykd.module(module_name)
+        bin = lief.parse(module.image())
+
+        sig = bytes.fromhex("B1 19 BF 44 4E E6 40 BB")
+
+        data_secs = [s for s in bin.sections if s.name.startswith(".data")]
+        if not data_secs:
+            return None
+        data = data_secs[0]
+
+        blob = bytes(data.content or [])
+        idx = blob.find(sig)
+        if idx == -1:
+            return None
+        return module.begin() + data.virtual_address + idx + 4
 
     def get_string(self, ptr: int) -> Optional[str]:
         try:
@@ -1733,12 +1751,8 @@ class SEH(TEB):
         return (EnclosingLevel, FilterFunc, HandlerFunc)
 
     def except_handler4(self, sehinfo: SEHInfo) -> tuple[int, int, int]:
-        symname = memoryaccess.get_symbol(sehinfo.Handler).split("!")[0]
-        security_cookie = int.from_bytes(
-            memoryaccess.get_bytes(
-                memoryaccess.get_addr_from_symbol(f"{symname}!__security_cookie"), 4
-            ),
-            byteorder="little",
+        security_cookie = memoryaccess.get_uint(
+            memoryaccess.get_code_security_cookie(pykd.dbgCommand("lme 1m").strip())
         )
         scopetable_array = self.get_scopetable(sehinfo) ^ security_cookie
 
@@ -1746,6 +1760,8 @@ class SEH(TEB):
         gs_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0x4)
         eh_cookie_offset = memoryaccess.get_int(scopetable_array + 0x8)
         eh_cookie_xor_offset = memoryaccess.get_int(scopetable_array + 0xC)
+
+        assert not (gs_cookie_offset == None and eh_cookie_offset == None)
 
         checker = 0
 
